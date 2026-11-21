@@ -29,4 +29,4 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           EDGAR_IDENTITY: ${{ secrets.EDGAR_IDENTITY }}
-        run: python scraper.py
+        run: python scraper.py*
