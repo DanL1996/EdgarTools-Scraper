@@ -43,15 +43,14 @@ class FilingExtraction(BaseModel):
 
 
 def extract_with_claude(form_type: str, filing_text: str) -> FilingExtraction:
-    prompt = f"""You are a senior 1940-Act regulatory analyst. Extract structured intelligence from this SEC Form {form_type} filing.
-Rules:
-- Only classify as 'New Fund Launch / Registration', 'Material Amendment / Conversion', or 'Exemptive Relief Application' if it introduces a new fund/series, converts a mutual fund to an ETF, or requests novel 1940-Act exemptive relief.
-- Classify routine annual prospectus updates (485BPOS with no new fund/material change) or routine administrative filings as 'Routine / Ignore'.
-- Do NOT guess or fabricate law firms, advisers, or quotes. Return null if not explicitly present in the text.
-
-FILING EXCERPT:
-{filing_text[:28000]}
-"""
+    prompt = (
+        f"You are a senior 1940-Act regulatory analyst. Extract structured intelligence from this SEC Form {form_type} filing.\n"
+        "Rules:\n"
+        "- Only classify as 'New Fund Launch / Registration', 'Material Amendment / Conversion', or 'Exemptive Relief Application' if it introduces a new fund/series, converts a mutual fund to an ETF, or requests novel 1940-Act exemptive relief.\n"
+        "- Classify routine annual prospectus updates (485BPOS with no new fund/material change) or routine administrative filings as 'Routine / Ignore'.\n"
+        "- Do NOT guess or fabricate law firms, advisers, or quotes. Return null if not explicitly present in the text.\n\n"
+        f"FILING EXCERPT:\n{filing_text[:28000]}"
+    )
     response = anthropic_client.messages.parse(
         model="claude-sonnet-4-5",
         max_tokens=1024,
@@ -62,7 +61,6 @@ FILING EXCERPT:
 
 
 def run():
-    # Look back 3 days so weekend/holiday manual runs still catch recent SEC filings
     start_date = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
     print(f"Fetching 1940-Act filings since {start_date}...")
 
@@ -71,7 +69,6 @@ def run():
         print("No matching filings found in window.")
         return
 
-    # Cap at 25 filings per run to keep test runs fast and low-cost
     batch = list(filings)[:25]
     print(f"Inspecting {len(batch)} filings...")
 
@@ -94,4 +91,34 @@ def run():
 
             extracted = extract_with_claude(filing.form, text)
             if extracted.brief_category == "Routine / Ignore":
-                print(f"
+                print(f"Skipped routine filing: {acc_no} ({filing.form})")
+                continue
+
+            payload = {
+                "accession_number": acc_no,
+                "form_type": filing.form,
+                "filing_date": str(filing.filing_date),
+                "edgar_url": filing.filing_url,
+                "brief_category": extracted.brief_category,
+                "trust_or_registrant_name": extracted.trust_or_registrant_name,
+                "fund_name": extracted.fund_name,
+                "investment_adviser": extracted.investment_adviser,
+                "strategy_asset_class": extracted.strategy_asset_class,
+                "legal_counsel_firm": extracted.legal_counsel_firm,
+                "verbatim_key_excerpt": extracted.verbatim_key_excerpt,
+                "raw_payload": extracted.model_dump(),
+            }
+
+            supabase.table("sec_filings").upsert(payload).execute()
+            inserted += 1
+            label = extracted.fund_name or extracted.trust_or_registrant_name
+            print(f"Saved [{extracted.brief_category}]: {label}")
+
+        except Exception as e:
+            print(f"Error processing {acc_no}: {e}")
+
+    print(f"Done. Inserted {inserted} new actionable filings.")
+
+
+if __name__ == "__main__":
+    run()
