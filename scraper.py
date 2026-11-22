@@ -1,7 +1,7 @@
 import os
 import json
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 from edgar import set_identity, get_filings
 from anthropic import Anthropic
@@ -12,16 +12,27 @@ set_identity(os.environ["EDGAR_IDENTITY"])
 anthropic_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
-TARGET_FORMS = ["N-1A", "485APOS", "485BPOS", "N-2", "40-APP"]
+TARGET_FORMS = ["N-1A", "485APOS", "485BPOS", "N-2", "N-2/A", "40-APP"]
 
 
 # 2. Define strict extraction schema for 1940-Act regulatory intelligence
 class FilingExtraction(BaseModel):
     is_actionable: bool = Field(
-        description="True ONLY if this filing represents a new fund/ETF launch, new series registration, mutual-fund-to-ETF conversion, closed-end/interval fund launch, or 1940-Act exemptive relief application. False for routine annual prospectus updates with no new series/strategy."
+        description="True ONLY if this filing represents a new fund/ETF launch, new series registration, mutual-fund-to-ETF conversion, closed-end/interval/tender-offer fund launch, or 1940-Act exemptive relief application. False for routine annual prospectus updates with no new series/strategy."
+    )
+    vertical: Literal["etf_launches", "private_markets"] = Field(
+        description=(
+            "Route to 'private_markets' if this is an N-2 or N-2/A filing (interval fund, tender offer fund, non-traded BDC, closed-end fund), "
+            "a 40-APP seeking co-investment relief (Section 17(d)/57(i)) or multi-class interval/tender-offer fund relief, "
+            "or an N-1A/485 filing whose primary strategy allocates >15% to private credit, private equity, venture capital, infrastructure, or unlisted secondaries. "
+            "Route all standard ETFs, mutual-fund-to-ETF conversions, and standard ETF exemptive relief to 'etf_launches'."
+        )
     )
     brief_category: str = Field(
-        description="One of: 'New Fund Launch', 'ETF Conversion / Material Amendment', 'Exemptive Relief Application', or 'Routine Update'"
+        description=(
+            "If vertical is 'etf_launches', choose one of: 'New Fund Launch', 'ETF Conversion / Material Amendment', 'Exemptive Relief Application', or 'Routine Update'. "
+            "If vertical is 'private_markets', choose one of: 'New Interval / Tender Offer Fund', 'Private Credit / PE ETF Launch', 'Co-Investment & Multi-Class Relief', or 'Routine Update'."
+        )
     )
     trust_or_registrant_name: Optional[str] = Field(
         default=None,
@@ -49,7 +60,7 @@ class FilingExtraction(BaseModel):
     )
     strategy_asset_class: Optional[str] = Field(
         default=None,
-        description="Concise 1-sentence description of the fund's investment strategy, wrapper (Active ETF, Index ETF, Interval Fund), or exemptive relief requested."
+        description="Concise 1-sentence description of the fund's investment strategy, wrapper (Active ETF, Index ETF, Interval Fund, Tender Offer Fund, BDC), or exemptive relief requested."
     )
     management_fee: Optional[str] = Field(
         default=None,
@@ -57,7 +68,7 @@ class FilingExtraction(BaseModel):
     )
     listing_exchange: Optional[str] = Field(
         default=None,
-        description="Target listing exchange for ETFs/CEFs (e.g., 'NYSE Arca', 'Nasdaq', 'Cboe BZX'), or null if mutual fund or TBD."
+        description="Target listing exchange for ETFs/CEFs (e.g., 'NYSE Arca', 'Nasdaq', 'Cboe BZX'), or null if unlisted interval/tender-offer fund or TBD."
     )
     distributor_or_admin: Optional[str] = Field(
         default=None,
@@ -65,7 +76,7 @@ class FilingExtraction(BaseModel):
     )
     verbatim_key_excerpt: Optional[str] = Field(
         default=None,
-        description="Exact 1-2 sentence verbatim quote from the filing summarizing the new fund objective or relief sought."
+        description="Exact 1-2 sentence verbatim quote from the filing summarizing the new fund objective, repurchase policy, or relief sought."
     )
 
 
@@ -78,7 +89,7 @@ def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
         max_tokens=1024,
         system=(
             "You are a senior 1940-Act regulatory intelligence analyst writing for ETF/mutual fund executives, "
-            "fund service providers, and 1940-Act legal counsel. Extract exact facts from the SEC filing. "
+            "alternative asset managers, fund service providers, and 1940-Act legal counsel. Extract exact facts from the SEC filing. "
             "Never guess or invent names, fees, or exchanges—if a field is blank or '[__]', return null."
         ),
         messages=[
@@ -97,7 +108,7 @@ def run():
     print(f"Fetching 1940-Act filings since {since_date}...")
 
     filings = get_filings(form=TARGET_FORMS, filing_date=f"{since_date}:")
-    recent_filings = filings.head(25)
+    recent_filings = filings.head(40)
     print(f"Inspecting {len(recent_filings)} filings...")
 
     inserted_count = 0
@@ -131,6 +142,7 @@ def run():
                 "form_type": filing.form,
                 "filing_date": str(filing.filing_date),
                 "edgar_url": filing.filing_url,
+                "vertical": extraction.vertical,
                 "brief_category": extraction.brief_category,
                 "trust_or_registrant_name": extraction.trust_or_registrant_name,
                 "fund_name": extraction.fund_name,
@@ -148,7 +160,7 @@ def run():
 
             supabase.table("sec_filings").upsert(row).execute()
             inserted_count += 1
-            print(f"Inserted {filing.form}: {extraction.fund_name or extraction.trust_or_registrant_name}")
+            print(f"[{extraction.vertical}] Inserted {filing.form}: {extraction.fund_name or extraction.trust_or_registrant_name}")
 
         except Exception as e:
             print(f"Error processing {acc_num}: {e}")
