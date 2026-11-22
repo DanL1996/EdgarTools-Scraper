@@ -89,7 +89,7 @@ def analyze_filing(form_type: str, filing_text: str) -> BackfillExtraction:
     # First 16,000 chars captures cover page, counsel, adviser, fee table, and investment objective
     excerpt = filing_text[:16000]
     response = anthropic_client.messages.parse(
-        model="claude-sonnet-4-5",
+        model="claude-sonnet-5-5",
         max_tokens=1024,
         system=(
             "You are a senior 1940-Act regulatory intelligence analyst covering interval funds, tender-offer funds, BDCs, "
