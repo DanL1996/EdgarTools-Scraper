@@ -85,7 +85,7 @@ def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
     excerpt = filing_text[:28000]
 
     response = anthropic_client.messages.parse(
-        model="claude-sonnet-4-5",
+        model="claude-sonnet-5-5",
         max_tokens=1024,
         system=(
             "You are a senior 1940-Act regulatory intelligence analyst writing for ETF/mutual fund executives, "
