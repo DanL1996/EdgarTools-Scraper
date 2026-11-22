@@ -4,26 +4,42 @@ from supabase import create_client
 
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
-# --- SPONSOR CONFIGURATION ---
-# Set to None when unsold so no placeholder text appears in live issues.
-# Populate the dictionary fields below once a sponsor is booked.
-PRESENTING_SPONSOR = None
-# Example when active:
-# PRESENTING_SPONSOR = {
-#     "name": "Tidal Financial Group",
-#     "tagline": "Powering the next generation of 1940-Act ETFs & Interval Funds.",
-#     "cta_text": "Learn more",
-#     "url": "https://example.com"
-# }
-
-PARTNER_SPOTLIGHT = None
-# Example when active:
-# PARTNER_SPOTLIGHT = {
-#     "headline": "Launching an Active ETF or Mutual Fund Conversion in 2026?",
-#     "body": "Tidal provides turnkey 1940-Act trust administration, capital markets support, and compliance infrastructure—getting your fund from initial N-1A to listing in 75 days.",
-#     "cta_text": "Request a Launch Timeline",
-#     "url": "https://example.com"
-# }
+# --- EDITION CONFIGURATIONS ---
+# Update titles, subtitles, and sponsor dicts here whenever you finalize names or book sponsors.
+EDITIONS = {
+    "etf_launches": {
+        "output_file": "brief_launches.html",
+        "kicker": "1940-Act Regulatory Intelligence",
+        "title": "ETF & Fund Launch Brief",
+        "subtitle": "New ETF & Mutual Fund Launches, Conversions, and Exemptive Relief Applications",
+        "accent_color": "#0f172a",   # Navy Slate
+        "badge_bg": "#eff6ff",
+        "badge_text": "#1d4ed8",
+        "categories": [
+            "New Fund Launch",
+            "ETF Conversion / Material Amendment",
+            "Exemptive Relief Application",
+        ],
+        "presenting_sponsor": None,
+        "partner_spotlight": None,
+    },
+    "private_markets": {
+        "output_file": "brief_private_markets.html",
+        "kicker": "Alternative & Illiquid Registered Funds",
+        "title": "Private Markets in Public Funds Brief",
+        "subtitle": "Interval Funds, Tender Offer Funds, BDCs, Private Credit & PE-in-ETF Filings",
+        "accent_color": "#064e3b",   # Institutional Forest Green
+        "badge_bg": "#ecfdf5",
+        "badge_text": "#047857",
+        "categories": [
+            "New Interval / Tender Offer Fund",
+            "Private Credit / PE ETF Launch",
+            "Co-Investment & Multi-Class Relief",
+        ],
+        "presenting_sponsor": None,
+        "partner_spotlight": None,
+    },
+}
 
 
 def format_meta_pills(row: dict) -> str:
@@ -48,7 +64,7 @@ def format_meta_pills(row: dict) -> str:
     return " &nbsp;|&nbsp; ".join(items)
 
 
-def render_filing_card(row: dict) -> str:
+def render_filing_card(row: dict, cfg: dict) -> str:
     title = row.get("fund_name") or row.get("trust_or_registrant_name") or "Unnamed Registrant"
     trust = row.get("trust_or_registrant_name")
     subtitle = f"<div style='font-size:13px;color:#64748b;margin-top:2px;'>{trust}</div>" if trust and trust != title else ""
@@ -62,7 +78,7 @@ def render_filing_card(row: dict) -> str:
     return f"""
     <div style="border-bottom:1px solid #e2e8f0;padding:18px 0;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-        <span style="display:inline-block;background:#eff6ff;color:#1d4ed8;font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:0.4px;">
+        <span style="display:inline-block;background:{cfg['badge_bg']};color:{cfg['badge_text']};font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;letter-spacing:0.4px;">
           FORM {form_type} &bull; {filing_date}
         </span>
       </div>
@@ -77,73 +93,79 @@ def render_filing_card(row: dict) -> str:
         {strategy}
       </p>
       {f'<blockquote style="margin:8px 0 10px 0;padding:8px 12px;border-left:3px solid #94a3b8;background:#f8fafc;color:#475569;font-size:13px;font-style:italic;line-height:1.5;">“{excerpt}”</blockquote>' if excerpt else ''}
-      <a href="{url}" target="_blank" style="font-size:13px;font-weight:600;color:#1d4ed8;text-decoration:none;">
+      <a href="{url}" target="_blank" style="font-size:13px;font-weight:600;color:{cfg['badge_text']};text-decoration:none;">
         View Official SEC Filing &rarr;
       </a>
     </div>
     """
 
 
-def build_brief_html(filings: list[dict]) -> str:
+def build_brief_html(filings: list[dict], cfg: dict) -> str:
     today_str = datetime.now(timezone.utc).strftime("%B %d, %Y")
+    default_cat = cfg["categories"][0]
 
-    grouped = {
-        "New Fund Launch": [],
-        "ETF Conversion / Material Amendment": [],
-        "Exemptive Relief Application": [],
-    }
+    grouped = {cat: [] for cat in cfg["categories"]}
     for f in filings:
         cat = f.get("brief_category")
         if cat in grouped:
             grouped[cat].append(f)
         else:
-            grouped["New Fund Launch"].append(f)
+            grouped[default_cat].append(f)
 
     sections_html = ""
     section_index = 0
+    spotlight = cfg.get("partner_spotlight")
 
     for category, items in grouped.items():
         if not items:
             continue
         section_index += 1
-        cards = "".join(render_filing_card(item) for item in items)
+        cards = "".join(render_filing_card(item, cfg) for item in items)
         sections_html += f"""
         <div style="margin-top:26px;">
-          <h2 style="font-size:13px;text-transform:uppercase;letter-spacing:1px;color:#0f172a;border-bottom:2px solid #0f172a;padding-bottom:6px;margin:0;">
+          <h2 style="font-size:13px;text-transform:uppercase;letter-spacing:1px;color:{cfg['accent_color']};border-bottom:2px solid {cfg['accent_color']};padding-bottom:6px;margin:0;">
             {category} ({len(items)})
           </h2>
           {cards}
         </div>
         """
 
-        if section_index == 1 and PARTNER_SPOTLIGHT:
+        if section_index == 1 and spotlight:
             sections_html += f"""
-            <div style="margin:24px 0;padding:18px 20px;background:#f8fafc;border:1px solid #cbd5e1;border-left:4px solid #0f172a;border-radius:4px;">
+            <div style="margin:24px 0;padding:18px 20px;background:#f8fafc;border:1px solid #cbd5e1;border-left:4px solid {cfg['accent_color']};border-radius:4px;">
               <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b;margin-bottom:6px;">
                 Partner Spotlight &bull; Sponsored
               </div>
               <div style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:6px;">
-                {PARTNER_SPOTLIGHT["headline"]}
+                {spotlight["headline"]}
               </div>
               <div style="font-size:13.5px;color:#334155;line-height:1.55;margin-bottom:10px;">
-                {PARTNER_SPOTLIGHT["body"]}
+                {spotlight["body"]}
               </div>
-              <a href="{PARTNER_SPOTLIGHT["url"]}" target="_blank" style="display:inline-block;background:#0f172a;color:#ffffff;font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:4px;text-decoration:none;">
-                {PARTNER_SPOTLIGHT["cta_text"]} &rarr;
+              <a href="{spotlight["url"]}" target="_blank" style="display:inline-block;background:{cfg['accent_color']};color:#ffffff;font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:4px;text-decoration:none;">
+                {spotlight["cta_text"]} &rarr;
               </a>
             </div>
             """
 
+    if not sections_html:
+        sections_html = """
+        <div style="margin-top:24px;padding:20px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;color:#475569;font-size:14px;">
+          No new filings matched this vertical in the latest run. Once N-2 and private-market filings are ingested, they will populate here automatically.
+        </div>
+        """
+
+    presenting = cfg.get("presenting_sponsor")
     presenting_html = ""
-    if PRESENTING_SPONSOR:
+    if presenting:
         presenting_html = f"""
         <div style="background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:12px 28px;font-size:12.5px;color:#334155;">
           <span style="font-weight:700;text-transform:uppercase;font-size:10px;letter-spacing:0.8px;color:#64748b;margin-right:8px;">
             Presented By
           </span>
-          <strong>{PRESENTING_SPONSOR["name"]}</strong>:
-          {PRESENTING_SPONSOR["tagline"]}
-          <a href="{PRESENTING_SPONSOR["url"]}" target="_blank" style="color:#1d4ed8;font-weight:600;text-decoration:none;margin-left:4px;">{PRESENTING_SPONSOR["cta_text"]} &rarr;</a>
+          <strong>{presenting["name"]}</strong>:
+          {presenting["tagline"]}
+          <a href="{presenting["url"]}" target="_blank" style="color:{cfg['badge_text']};font-weight:600;text-decoration:none;margin-left:4px;">{presenting["cta_text"]} &rarr;</a>
         </div>
         """
 
@@ -152,21 +174,21 @@ def build_brief_html(filings: list[dict]) -> str:
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>1940-Act Daily Regulatory Brief — {today_str}</title>
+  <title>{cfg['title']} — {today_str}</title>
 </head>
 <body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
   <div style="max-width:680px;margin:24px auto;background:#ffffff;border:1px solid #e2e8f0;border-radius:6px;overflow:hidden;">
     
     <!-- Masthead -->
-    <div style="background:#0f172a;color:#ffffff;padding:24px 28px;">
-      <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:#94a3b8;font-weight:600;">
-        Daily SEC EDGAR Intelligence &bull; {today_str}
+    <div style="background:{cfg['accent_color']};color:#ffffff;padding:24px 28px;">
+      <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:#cbd5e1;font-weight:600;">
+        {cfg['kicker']} &bull; {today_str}
       </div>
       <h1 style="margin:6px 0 4px 0;font-size:22px;font-weight:800;letter-spacing:-0.3px;">
-        The 1940-Act Filing Brief
+        {cfg['title']}
       </h1>
-      <div style="font-size:13px;color:#cbd5e1;">
-        New ETF &amp; Fund Launches, Conversions, and Exemptive Relief Applications
+      <div style="font-size:13px;color:#e2e8f0;">
+        {cfg['subtitle']}
       </div>
     </div>
 
@@ -175,7 +197,7 @@ def build_brief_html(filings: list[dict]) -> str:
     <!-- Main Body -->
     <div style="padding:10px 28px 28px 28px;">
       <div style="font-size:13.5px;color:#475569;margin-top:12px;line-height:1.5;">
-        Good morning. Here are the <strong>{len(filings)} actionable 1940-Act filings</strong> spotted on SEC EDGAR, complete with counsel, adviser, and key prospectus disclosures.
+        Here are the <strong>{len(filings)} notable filings</strong> spotted on SEC EDGAR, complete with counsel, adviser, and key prospectus disclosures.
       </div>
 
       {sections_html}
@@ -183,7 +205,7 @@ def build_brief_html(filings: list[dict]) -> str:
 
     <!-- Footer -->
     <div style="background:#f8fafc;border-top:1px solid #e2e8f0;padding:18px 28px;font-size:12px;color:#64748b;line-height:1.5;">
-      <strong>Interested in sponsoring The 1940-Act Filing Brief?</strong> Reach 1940-Act legal counsel, ETF issuers, and fund executives every morning. Reply to this email for the 2026 media kit.
+      <strong>Interested in sponsoring the {cfg['title']}?</strong> Reach 1940-Act legal counsel, fund sponsors, and product heads. Reply to this email for the media kit.
     </div>
 
   </div>
@@ -193,20 +215,22 @@ def build_brief_html(filings: list[dict]) -> str:
 
 
 def run():
-    response = (
-        supabase.table("sec_filings")
-        .select("*")
-        .order("filing_date", desc=True)
-        .limit(15)
-        .execute()
-    )
-    filings = response.data or []
-    print(f"Loaded {len(filings)} filings from Supabase.")
+    for vertical_key, cfg in EDITIONS.items():
+        response = (
+            supabase.table("sec_filings")
+            .select("*")
+            .eq("vertical", vertical_key)
+            .order("filing_date", desc=True)
+            .limit(15)
+            .execute()
+        )
+        filings = response.data or []
+        print(f"[{vertical_key}] Loaded {len(filings)} filings from Supabase.")
 
-    html = build_brief_html(filings)
-    with open("daily_brief.html", "w", encoding="utf-8") as f:
-        f.write(html)
-    print("Generated daily_brief.html successfully.")
+        html = build_brief_html(filings, cfg)
+        with open(cfg["output_file"], "w", encoding="utf-8") as f:
+            f.write(html)
+        print(f"[{vertical_key}] Generated {cfg['output_file']} successfully.")
 
 
 if __name__ == "__main__":
