@@ -1,0 +1,53 @@
+name: 2026 YTD Private Markets Backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      start_date:
+        description: 'Start date (YYYY-MM-DD)'
+        required: true
+        default: '2026-01-01'
+      max_filings:
+        description: 'Max filings to inspect per run'
+        required: true
+        default: '150'
+
+jobs:
+  backfill-and-preview:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install edgartools anthropic supabase pydantic
+
+      - name: Run 2026 YTD Backfill
+        env:
+          EDGAR_IDENTITY: ${{ secrets.EDGAR_IDENTITY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          BACKFILL_START_DATE: ${{ github.event.inputs.start_date }}
+          BACKFILL_LIMIT: ${{ github.event.inputs.max_filings }}
+        run: python backfill_ytd.py
+
+      - name: Generate Updated Brief Previews
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python send_brief.py
+
+      - name: Upload Brief Preview Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: 1940-act-brief-previews
+          path: |
+            brief_launches.html
+            brief_private_markets.html
