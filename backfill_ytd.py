@@ -110,11 +110,13 @@ def analyze_filing(form_type: str, filing_text: str) -> BackfillExtraction:
 def run():
     start_date = os.environ.get("BACKFILL_START_DATE", "2026-01-01")
     max_inspect = int(os.environ.get("BACKFILL_LIMIT", "150"))
+    target_year = int(start_date[:4])
 
-    print(f"Fetching {BACKFILL_FORMS} filings from {start_date} to present (limit {max_inspect})...")
-    filings = get_filings(form=BACKFILL_FORMS, filing_date=f"{start_date}:")
+    print(f"Fetching {BACKFILL_FORMS} filings for {target_year} from {start_date} to present (limit {max_inspect})...")
+    filings = get_filings(year=target_year, form=BACKFILL_FORMS, filing_date=f"{start_date}:")
     batch = filings.head(max_inspect)
-    print(f"Inspecting {len(batch)} filings...")
+    print(f"Inspecting {len(batch)} filings (out of {len(filings)} total matching filings)...")
+
 
     inserted_count = 0
     skipped_existing = 0
