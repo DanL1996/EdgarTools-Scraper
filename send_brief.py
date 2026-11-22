@@ -4,6 +4,27 @@ from supabase import create_client
 
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
+# --- SPONSOR CONFIGURATION ---
+# Set to None when unsold so no placeholder text appears in live issues.
+# Populate the dictionary fields below once a sponsor is booked.
+PRESENTING_SPONSOR = None
+# Example when active:
+# PRESENTING_SPONSOR = {
+#     "name": "Tidal Financial Group",
+#     "tagline": "Powering the next generation of 1940-Act ETFs & Interval Funds.",
+#     "cta_text": "Learn more",
+#     "url": "https://example.com"
+# }
+
+PARTNER_SPOTLIGHT = None
+# Example when active:
+# PARTNER_SPOTLIGHT = {
+#     "headline": "Launching an Active ETF or Mutual Fund Conversion in 2026?",
+#     "body": "Tidal provides turnkey 1940-Act trust administration, capital markets support, and compliance infrastructure—getting your fund from initial N-1A to listing in 75 days.",
+#     "cta_text": "Request a Launch Timeline",
+#     "url": "https://example.com"
+# }
+
 
 def format_meta_pills(row: dict) -> str:
     """Builds clean inline metadata badges only for populated fields."""
@@ -95,23 +116,36 @@ def build_brief_html(filings: list[dict]) -> str:
         </div>
         """
 
-        if section_index == 1:
-            sections_html += """
+        if section_index == 1 and PARTNER_SPOTLIGHT:
+            sections_html += f"""
             <div style="margin:24px 0;padding:18px 20px;background:#f8fafc;border:1px solid #cbd5e1;border-left:4px solid #0f172a;border-radius:4px;">
               <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b;margin-bottom:6px;">
                 Partner Spotlight &bull; Sponsored
               </div>
               <div style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:6px;">
-                Launching an Active ETF or Mutual Fund Conversion in 2026?
+                {PARTNER_SPOTLIGHT["headline"]}
               </div>
               <div style="font-size:13.5px;color:#334155;line-height:1.55;margin-bottom:10px;">
-                [Sponsor Name] provides turnkey 1940-Act trust administration, capital markets support, and compliance infrastructure—getting your fund from initial N-1A to listing in 75 days.
+                {PARTNER_SPOTLIGHT["body"]}
               </div>
-              <a href="#" style="display:inline-block;background:#0f172a;color:#ffffff;font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:4px;text-decoration:none;">
-                Request a Launch Timeline &rarr;
+              <a href="{PARTNER_SPOTLIGHT["url"]}" target="_blank" style="display:inline-block;background:#0f172a;color:#ffffff;font-size:12.5px;font-weight:600;padding:7px 14px;border-radius:4px;text-decoration:none;">
+                {PARTNER_SPOTLIGHT["cta_text"]} &rarr;
               </a>
             </div>
             """
+
+    presenting_html = ""
+    if PRESENTING_SPONSOR:
+        presenting_html = f"""
+        <div style="background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:12px 28px;font-size:12.5px;color:#334155;">
+          <span style="font-weight:700;text-transform:uppercase;font-size:10px;letter-spacing:0.8px;color:#64748b;margin-right:8px;">
+            Presented By
+          </span>
+          <strong>{PRESENTING_SPONSOR["name"]}</strong>:
+          {PRESENTING_SPONSOR["tagline"]}
+          <a href="{PRESENTING_SPONSOR["url"]}" target="_blank" style="color:#1d4ed8;font-weight:600;text-decoration:none;margin-left:4px;">{PRESENTING_SPONSOR["cta_text"]} &rarr;</a>
+        </div>
+        """
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -136,15 +170,7 @@ def build_brief_html(filings: list[dict]) -> str:
       </div>
     </div>
 
-    <!-- Presenting Sponsor Header Slot -->
-    <div style="background:#f8fafc;border-bottom:1px solid #e2e8f0;padding:12px 28px;font-size:12.5px;color:#334155;">
-      <span style="font-weight:700;text-transform:uppercase;font-size:10px;letter-spacing:0.8px;color:#64748b;margin-right:8px;">
-        Presented By
-      </span>
-      <strong>[Presenting Sponsor — e.g., Tidal / Ultimus / NYSE Arca]</strong>:
-      Powering the next generation of 1940-Act ETFs &amp; Interval Funds.
-      <a href="#" style="color:#1d4ed8;font-weight:600;text-decoration:none;margin-left:4px;">Learn more &rarr;</a>
-    </div>
+    {presenting_html}
 
     <!-- Main Body -->
     <div style="padding:10px 28px 28px 28px;">
@@ -185,4 +211,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-
