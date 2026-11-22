@@ -112,27 +112,29 @@ def run():
     max_inspect = int(os.environ.get("BACKFILL_LIMIT", "150"))
     target_year = int(start_date[:4])
 
-    print(f"Fetching {BACKFILL_FORMS} filings for {target_year} from {start_date} to present (limit {max_inspect})...")
+    print(f"Fetching {BACKFILL_FORMS} filings for {target_year} from {start_date} to present...")
     filings = get_filings(year=target_year, form=BACKFILL_FORMS, filing_date=f"{start_date}:")
-    batch = filings.head(max_inspect)
-    print(f"Inspecting {len(batch)} filings (out of {len(filings)} total matching filings)...")
+    print(f"Found {len(filings)} total matching filings in {target_year}. Will inspect up to {max_inspect} NEW filings...")
 
+    # Pre-load all existing accession numbers in one query for instant deduplication
+    existing_resp = supabase.table("sec_filings").select("accession_number").execute()
+    existing_accs = {row["accession_number"] for row in (existing_resp.data or [])}
+    print(f"Loaded {len(existing_accs)} existing records from Supabase to skip.")
 
     inserted_count = 0
     skipped_existing = 0
+    new_checked = 0
 
-    for filing in batch:
+    for filing in filings:
+        if new_checked >= max_inspect:
+            break
+
         acc_num = filing.accession_number
-
-        existing = (
-            supabase.table("sec_filings")
-            .select("accession_number")
-            .eq("accession_number", acc_num)
-            .execute()
-        )
-        if existing.data:
+        if acc_num in existing_accs:
             skipped_existing += 1
             continue
+
+        new_checked += 1
 
         try:
             text = filing.text()
@@ -163,6 +165,7 @@ def run():
                 "distributor_or_admin": extraction.distributor_or_admin,
                 "verbatim_key_excerpt": extraction.verbatim_key_excerpt,
                 "raw_payload": extraction.model_dump(),
+
             }
 
             supabase.table("sec_filings").upsert(row).execute()
