@@ -33,9 +33,10 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUBBASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUBBASE_SECRET }}
         run: python send_brief.py
-
-      - name: Upload Brief Preview Artifact
-        uses: actions/upload-artifact@v7
+      - name: Upload Brief Preview Artifacts
+        uses: actions/upload-artifact@v4
         with:
-          path: daily_brief.html
-          archive: false
+          name: 1940-act-brief-previews
+          path: |
+            brief_launches.html
+            brief_private_markets.html
