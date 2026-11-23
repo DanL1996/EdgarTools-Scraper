@@ -125,14 +125,13 @@ def run():
     inserted_count = 0
     skipped_existing = 0
     new_checked = 0
-
     for filing in filings:
         if new_checked >= max_inspect:
             break
 
         acc_num = filing.accession_number
         if acc_num in existing_accs:
-                      skipped_existing += 1
+            skipped_existing += 1
             continue
 
         new_checked += 1
@@ -148,6 +147,7 @@ def run():
                 print(f"Skipping non-actionable {filing.form} ({acc_num})")
                 existing_accs.add(acc_num)
                 continue
+
 
             row = {
                 "accession_number": acc_num,
