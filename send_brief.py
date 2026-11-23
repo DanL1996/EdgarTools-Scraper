@@ -220,24 +220,25 @@ def render_pm_ytd_tracker_html(tracker: dict, current_year: int, cfg: dict) -> s
         <strong>{current_year} YTD Totals:</strong> {total_n2} initial N-2 launches &bull; {n2_amend} N-2/A registration amendments &bull; {new_exemptive} new exemptive relief applications.
       </div>
 
-      <!-- League Table A: Top Law Firms -->
-      <h3 style="font-size:12.5px;text-transform:uppercase;letter-spacing:0.8px;color:{cfg['accent_color']};border-bottom:1.5px solid {cfg['accent_color']};padding-bottom:5px;margin:0 0 6px 0;">
-        {current_year} YTD League Table: Most Active Law Firms
-      </h3>
-      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin-bottom:24px;">
-        <thead>
-          <tr style="border-bottom:1px solid #cbd5e1;font-size:10.5px;text-transform:uppercase;color:#64748b;">
-            <th align="left" style="padding:6px;">#</th>
-            <th align="left" style="padding:6px;">Law Firm / Lead Counsel</th>
-            <th align="center" style="padding:6px;">New N-2</th>
-            <th align="center" style="padding:6px;">40-APP</th>
-            <th align="right" style="padding:6px;">Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {law_rows or '<tr><td colspan="5" style="padding:10px;font-size:12.5px;color:#64748b;">No counsel data recorded yet for this year.</td></tr>'}
-        </tbody>
-      </table>
+            # Law Firm League Table (Firm Name Only + Full Math Breakdown)
+        law_rows_html = ""
+        for idx, row in enumerate(law_firms, start=1):
+            firm = html.escape(str(row.get("law_firm") or "Unspecified"))
+            n2_count = int(row.get("new_launches") or 0)
+            n2a_count = int(row.get("amendments") or 0)
+            app_count = int(row.get("exemptive_apps") or 0)
+            total_count = int(row.get("total_filings") or 0)
+            law_rows_html += f"""
+            <tr style="border-bottom:1px solid #e2e8f0;">
+              <td style="padding:10px 8px;color:#64748b;font-size:12px;font-weight:700;width:28px;">{idx}</td>
+              <td style="padding:10px 8px;color:#0f172a;font-size:13px;font-weight:700;">{firm}</td>
+              <td style="padding:10px 8px;text-align:right;color:#334155;font-size:13px;">{n2_count}</td>
+              <td style="padding:10px 8px;text-align:right;color:#334155;font-size:13px;">{n2a_count}</td>
+              <td style="padding:10px 8px;text-align:right;color:#334155;font-size:13px;">{app_count}</td>
+              <td style="padding:10px 8px;text-align:right;color:#0f172a;font-size:13px;font-weight:800;">{total_count}</td>
+            </tr>
+            """
+
 
       <!-- League Table B: Most Active Sponsors -->
       <h3 style="font-size:12.5px;text-transform:uppercase;letter-spacing:0.8px;color:{cfg['accent_color']};border-bottom:1.5px solid {cfg['accent_color']};padding-bottom:5px;margin:0 0 6px 0;">
