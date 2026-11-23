@@ -70,9 +70,9 @@ class FilingExtraction(BaseModel):
     )
 
 
-# 3. LLM Analyzer
+# 3. LLM Analyzer (Cost-Optimized with Claude Haiku 5.5)
 def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
-    truncated_text = filing_text[:45000]
+    truncated_text = filing_text[:20000]
 
     prompt = (
         f"You are an institutional 1940 Act & Private Markets regulatory intelligence analyst. "
@@ -81,7 +81,7 @@ def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
     )
 
     response = claude.messages.parse(
-        model="claude-sonnet-5-5",
+        model="claude-haiku-5-5",
         max_tokens=1500,
         messages=[{"role": "user", "content": prompt}],
         output_format=FilingExtraction,
@@ -92,7 +92,7 @@ def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
 # 4. Main Backfill Runner
 def run():
     start_date = os.environ.get("BACKFILL_START_DATE", "2026-01-01")
-    max_inspect = int(os.environ.get("BACKFILL_LIMIT", "150"))
+    max_inspect = int(os.environ.get("BACKFILL_LIMIT", "250"))
     target_year = int(start_date[:4])
 
     print(f"Fetching {BACKFILL_FORMS} filings for {target_year} from {start_date} to present...")
