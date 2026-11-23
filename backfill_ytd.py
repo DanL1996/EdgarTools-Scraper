@@ -2,111 +2,94 @@ import os
 from typing import Literal, Optional
 from pydantic import BaseModel, Field
 from edgar import set_identity, get_filings
-from anthropic import Anthropic
-from supabase import create_client
+from supabase import create_client, Client
+import anthropic
 
-set_identity(os.environ["EDGAR_IDENTITY"])
-anthropic_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+# 1. Initialize Clients
+SEC_IDENTITY = os.environ.get("SEC_IDENTITY", "PrivateMarketsIntel research@example.com")
+set_identity(SEC_IDENTITY)
 
-# Focus specifically on Private Markets & Exemptive Relief forms
+SUPABASE_URL = os.environ["SUPABASE_URL"]
+SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+
+claude = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+
 BACKFILL_FORMS = ["N-2", "N-2/A", "40-APP", "40-APP/A"]
 
 
-class BackfillExtraction(BaseModel):
+# 2. Structured Extraction Schema
+class FilingExtraction(BaseModel):
     is_actionable: bool = Field(
         description=(
-            "True if this is an initial N-2 registration, an N-2/A pre-effective amendment that introduces or updates "
-            "material fund details (fees, sub-adviser, distributor, strategy, or repurchase terms), or a 40-APP / 40-APP/A "
-            "exemptive relief application. False if it is purely a clerical exhibit-only filing with no fund details."
+            "True ONLY if this filing represents a NEW or pre-launch registered fund "
+            "(interval fund, tender offer fund, non-traded BDC, listed CEF) filing an initial "
+            "N-2 or substantive pre-effective N-2/A, OR a new/amended 40-APP exemptive relief "
+            "application (e.g., co-investment relief, multi-class shares, interval fund liquidity). "
+            "False for routine annual updates, shelf takedowns, prospectus supplements, or operating companies."
         )
     )
-    vertical: Literal["etf_launches", "private_markets"] = Field(
-        description=(
-            "Route to 'private_markets' for all N-2 and N-2/A filings (interval funds, tender offer funds, BDCs, closed-end funds) "
-            "and for any 40-APP / 40-APP/A seeking co-investment relief (Section 17(d)/57(i)) or multi-class interval/tender-offer relief. "
-            "Route standard ETF exemptive relief (e.g., custom baskets, ETF share class of mutual fund) to 'etf_launches'."
-        )
+    vertical: Literal["private_markets", "exemptive_relief", "other"] = Field(
+        description="Categorize as private_markets (N-2/N-2A) or exemptive_relief (40-APP/40-APP/A)."
     )
     brief_category: str = Field(
-        description=(
-            "If vertical is 'private_markets', choose one of: 'New Interval, Tender Offer & CEF Launch', "
-            "'Private Credit / PE ETF Launch', 'Co-Investment & Multi-Class Relief', or 'Routine Update'. "
-            "If vertical is 'etf_launches', choose one of: 'New Fund Launch', 'ETF Conversion / Material Amendment', "
-            "'Exemptive Relief Application', or 'Routine Update'."
-        )
+        description="Short category label (e.g., 'New Interval Fund N-2', 'Non-Traded BDC N-2', 'Co-Investment 40-APP', 'Multi-Class 40-APP')."
     )
-    trust_or_registrant_name: Optional[str] = Field(
-        default=None,
-        description="Official name of the Investment Company / Trust / BDC / Applicant."
+    trust_or_registrant_name: str = Field(
+        description="Legal name of the registrant, trust, or lead applicant."
     )
-    fund_name: Optional[str] = Field(
-        default=None,
-        description="Specific name(s) of the fund(s) being registered or applying for relief."
+    fund_name: str = Field(
+        description="Specific fund name(s) or lead applicant(s) covered by this filing."
     )
     investment_adviser: Optional[str] = Field(
-        default=None,
-        description="Primary Investment Adviser or Sponsor named in the filing."
+        default=None, description="Primary investment adviser / sponsor."
     )
     sub_adviser: Optional[str] = Field(
-        default=None,
-        description="Sub-adviser(s) named in the filing, or null if none."
+        default=None, description="Sub-adviser(s), if any."
     )
     legal_counsel_firm: Optional[str] = Field(
-        default=None,
-        description="Outside law firm representing the registrant/applicant (found on cover page 'Copies to:')."
+        default=None, description="Outside fund or applicant legal counsel law firm."
     )
     lead_attorney: Optional[str] = Field(
-        default=None,
-        description="Named individual attorney / partner listed on the cover page ('Copy to:') or signature block, or null."
+        default=None, description="Lead partner / attorney named on the cover or signature block."
     )
     strategy_asset_class: Optional[str] = Field(
-        default=None,
-        description=(
-            "Start with the exact wrapper in brackets—e.g., [Interval Fund], [Tender Offer Fund], [BDC], [Listed CEF], or [Exemptive Relief]—"
-            "followed by a concise 1-sentence description of the strategy, repurchase/liquidity terms, or material updates added in this amendment."
-        )
+        default=None, description="Core investment strategy and asset class (e.g., 'Direct Lending / Private Credit', 'Secondaries / Private Equity')."
     )
     management_fee: Optional[str] = Field(
-        default=None,
-        description="Stated management fee (e.g., '1.25%' or '1.50% on gross assets'), or null if blank/[__]."
+        default=None, description="Stated annual management fee and any incentive/performance fee structure."
     )
     listing_exchange: Optional[str] = Field(
-        default=None,
-        description="Target listing exchange (e.g., 'NYSE', 'Nasdaq') if listed CEF/BDC, or null if unlisted interval/tender-offer fund."
+        default=None, description="Target exchange if listed (e.g., 'NYSE'), or 'Non-Traded / Interval' or 'Non-Traded / Tender Offer'."
     )
     distributor_or_admin: Optional[str] = Field(
-        default=None,
-        description="Named distributor/underwriter or fund administrator if disclosed, or null if blank/[__]."
+        default=None, description="Principal underwriter / distributor and/or fund administrator."
     )
-    verbatim_key_excerpt: Optional[str] = Field(
-        default=None,
-        description="Exact 1-2 sentence verbatim quote summarizing the investment objective, repurchase frequency, or relief sought."
+    verbatim_key_excerpt: str = Field(
+        description="1-2 sentence verbatim quote from the filing describing the fund's investment objective or exemptive relief requested."
     )
 
 
-def analyze_filing(form_type: str, filing_text: str) -> BackfillExtraction:
-    # First 16,000 chars captures cover page, counsel, adviser, fee table, and investment objective
-    excerpt = filing_text[:16000]
-    response = anthropic_client.messages.parse(
+# 3. LLM Analyzer
+def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
+    truncated_text = filing_text[:45000]
+
+    prompt = (
+        f"You are an institutional 1940 Act & Private Markets regulatory intelligence analyst. "
+        f"Analyze the following SEC Form {form_type} filing text and extract structured intelligence.\n\n"
+        f"FILING TEXT:\n{truncated_text}"
+    )
+
+    response = claude.messages.parse(
         model="claude-sonnet-5-5",
-        max_tokens=1024,
-        system=(
-            "You are a senior 1940-Act regulatory intelligence analyst covering interval funds, tender-offer funds, BDCs, "
-            "closed-end funds, and exemptive relief. Extract exact facts from the SEC filing. When analyzing an N-2/A or 40-APP/A "
-            "amendment, capture all newly populated details (fees, sub-advisers, distributors, repurchase terms). Never invent data."
-        ),
-        messages=[
-            {
-                "role": "user",
-                "content": f"Form Type: {form_type}\n\nFiling Text:\n{excerpt}"
-            }
-        ],
-        output_format=BackfillExtraction,
+        max_tokens=1500,
+        messages=[{"role": "user", "content": prompt}],
+        output_format=FilingExtraction,
     )
     return response.parsed_output
 
 
+# 4. Main Backfill Runner
 def run():
     start_date = os.environ.get("BACKFILL_START_DATE", "2026-01-01")
     max_inspect = int(os.environ.get("BACKFILL_LIMIT", "150"))
@@ -116,16 +99,14 @@ def run():
     filings = get_filings(year=target_year, form=BACKFILL_FORMS, filing_date=f"{start_date}:")
     print(f"Found {len(filings)} total matching filings in {target_year}. Will inspect up to {max_inspect} NEW filings...")
 
-    # Pre-load all existing accession numbers in one query for instant deduplication
-        existing_resp = 
-    supabase.table("sec_filings").select("accession_number").execute()
-        existing_accs = {row["accession_number"] for row in (existing_resp.data or [])}
-        print(f"Loaded {len(existing_accs)} existing records from Supabase to skip.")
-
+    existing_resp = supabase.table("sec_filings").select("accession_number").execute()
+    existing_accs = {row["accession_number"] for row in (existing_resp.data or [])}
+    print(f"Loaded {len(existing_accs)} existing records from Supabase to skip.")
 
     inserted_count = 0
     skipped_existing = 0
     new_checked = 0
+
     for filing in filings:
         if new_checked >= max_inspect:
             break
@@ -148,7 +129,6 @@ def run():
                 print(f"Skipping non-actionable {filing.form} ({acc_num})")
                 existing_accs.add(acc_num)
                 continue
-
 
             row = {
                 "accession_number": acc_num,
@@ -174,7 +154,10 @@ def run():
             supabase.table("sec_filings").upsert(row).execute()
             existing_accs.add(acc_num)
             inserted_count += 1
-            print(f"[{extraction.vertical}] {filing.filing_date} | {filing.form}: {extraction.fund_name or extraction.trust_or_registrant_name}")
+            print(
+                f"[{extraction.vertical}] {filing.filing_date} | {filing.form}: "
+                f"{extraction.fund_name or extraction.trust_or_registrant_name}"
+            )
 
         except Exception as e:
             err_str = str(e)
@@ -182,8 +165,6 @@ def run():
             if "credit balance is too low" in err_str or "authentication_error" in err_str:
                 print("Stopping backfill immediately due to Anthropic API billing/auth error.")
                 break
-
-            print(f"Error processing {acc_num}: {e}")
 
     print(f"Backfill complete. Inserted: {inserted_count} | Already in DB: {skipped_existing}")
 
