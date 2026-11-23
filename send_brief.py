@@ -1,3 +1,4 @@
+import html
 import os
 from datetime import datetime, timedelta, timezone
 from supabase import create_client
@@ -148,18 +149,22 @@ def render_pm_ytd_tracker_html(tracker: dict, current_year: int, cfg: dict) -> s
     total_n2 = sb.get("total_new_n2_launches", 0)
     n2_amend = sb.get("n2_amendments", 0)
 
-    law_rows = ""
+    # Law Firm League Table (Firm Name Only + Full Math Breakdown)
+    law_rows_html = ""
     for idx, row in enumerate(law_firms, start=1):
-        law_rows += f"""
+        firm = html.escape(str(row.get("law_firm") or "Unspecified"))
+        n2_count = int(row.get("new_launches") or 0)
+        n2a_count = int(row.get("amendments") or 0)
+        app_count = int(row.get("exemptive_apps") or 0)
+        total_count = int(row.get("total_filings") or 0)
+        law_rows_html += f"""
         <tr style="border-bottom:1px solid #e2e8f0;">
           <td style="padding:8px 6px;font-size:12.5px;color:#64748b;font-weight:700;">{idx}</td>
-          <td style="padding:8px 6px;font-size:12.5px;color:#0f172a;font-weight:600;">
-            {row.get('law_firm', '—')}
-            <div style="font-size:11px;color:#64748b;font-weight:400;">{row.get('lead_attorney', '')}</div>
-          </td>
-          <td align="center" style="padding:8px 6px;font-size:12.5px;color:#0f172a;font-weight:600;">{row.get('new_launches', 0)}</td>
-          <td align="center" style="padding:8px 6px;font-size:12.5px;color:#334155;">{row.get('exemptive_apps', 0)}</td>
-          <td align="right" style="padding:8px 6px;font-size:12.5px;color:{cfg['accent_color']};font-weight:700;">{row.get('total_filings', 0)}</td>
+          <td style="padding:8px 6px;font-size:12.5px;color:#0f172a;font-weight:600;">{firm}</td>
+          <td align="right" style="padding:8px 6px;font-size:12.5px;color:#0f172a;font-weight:600;">{n2_count}</td>
+          <td align="right" style="padding:8px 6px;font-size:12.5px;color:#334155;">{n2a_count}</td>
+          <td align="right" style="padding:8px 6px;font-size:12.5px;color:#334155;">{app_count}</td>
+          <td align="right" style="padding:8px 6px;font-size:12.5px;color:{cfg['accent_color']};font-weight:700;">{total_count}</td>
         </tr>
         """
 
@@ -170,8 +175,8 @@ def render_pm_ytd_tracker_html(tracker: dict, current_year: int, cfg: dict) -> s
         <tr style="border-bottom:1px solid #e2e8f0;">
           <td style="padding:8px 6px;font-size:12.5px;color:#64748b;font-weight:700;">{idx}</td>
           <td style="padding:8px 6px;font-size:12.5px;color:#0f172a;font-weight:600;">
-            {row.get('sponsor', '—')}
-            <div style="font-size:11px;color:#64748b;font-weight:400;">{structures}</div>
+            {html.escape(str(row.get('sponsor') or '—'))}
+            <div style="font-size:11px;color:#64748b;font-weight:400;">{html.escape(structures)}</div>
           </td>
           <td align="center" style="padding:8px 6px;font-size:12.5px;color:#0f172a;font-weight:600;">{row.get('new_launches', 0)}</td>
           <td align="right" style="padding:8px 6px;font-size:12.5px;color:{cfg['accent_color']};font-weight:700;">{row.get('total_filings', 0)}</td>
@@ -220,25 +225,25 @@ def render_pm_ytd_tracker_html(tracker: dict, current_year: int, cfg: dict) -> s
         <strong>{current_year} YTD Totals:</strong> {total_n2} initial N-2 launches &bull; {n2_amend} N-2/A registration amendments &bull; {new_exemptive} new exemptive relief applications.
       </div>
 
-            # Law Firm League Table (Firm Name Only + Full Math Breakdown)
-        law_rows_html = ""
-        for idx, row in enumerate(law_firms, start=1):
-            firm = html.escape(str(row.get("law_firm") or "Unspecified"))
-            n2_count = int(row.get("new_launches") or 0)
-            n2a_count = int(row.get("amendments") or 0)
-            app_count = int(row.get("exemptive_apps") or 0)
-            total_count = int(row.get("total_filings") or 0)
-            law_rows_html += f"""
-            <tr style="border-bottom:1px solid #e2e8f0;">
-              <td style="padding:10px 8px;color:#64748b;font-size:12px;font-weight:700;width:28px;">{idx}</td>
-              <td style="padding:10px 8px;color:#0f172a;font-size:13px;font-weight:700;">{firm}</td>
-              <td style="padding:10px 8px;text-align:right;color:#334155;font-size:13px;">{n2_count}</td>
-              <td style="padding:10px 8px;text-align:right;color:#334155;font-size:13px;">{n2a_count}</td>
-              <td style="padding:10px 8px;text-align:right;color:#334155;font-size:13px;">{app_count}</td>
-              <td style="padding:10px 8px;text-align:right;color:#0f172a;font-size:13px;font-weight:800;">{total_count}</td>
-            </tr>
-            """
-
+      <!-- League Table A: Most Active Law Firms -->
+      <h3 style="font-size:12.5px;text-transform:uppercase;letter-spacing:0.8px;color:{cfg['accent_color']};border-bottom:1.5px solid {cfg['accent_color']};padding-bottom:5px;margin:0 0 6px 0;">
+        {current_year} YTD League Table: Most Active Law Firms
+      </h3>
+      <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin-bottom:24px;">
+        <thead>
+          <tr style="border-bottom:1px solid #cbd5e1;font-size:10.5px;text-transform:uppercase;color:#64748b;">
+            <th align="left" style="padding:6px;">#</th>
+            <th align="left" style="padding:6px;">Law Firm</th>
+            <th align="right" style="padding:6px;white-space:nowrap;">New N-2</th>
+            <th align="right" style="padding:6px;white-space:nowrap;">N-2/A</th>
+            <th align="right" style="padding:6px;white-space:nowrap;">Exemp. Relief</th>
+            <th align="right" style="padding:6px;">Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {law_rows_html or '<tr><td colspan="6" style="padding:10px;font-size:12.5px;color:#64748b;">No law firm data recorded yet for this year.</td></tr>'}
+        </tbody>
+      </table>
 
       <!-- League Table B: Most Active Sponsors -->
       <h3 style="font-size:12.5px;text-transform:uppercase;letter-spacing:0.8px;color:{cfg['accent_color']};border-bottom:1.5px solid {cfg['accent_color']};padding-bottom:5px;margin:0 0 6px 0;">
@@ -423,7 +428,7 @@ def run():
 
             tracker_data = fetch_pm_ytd_tracker(current_year)
             ytd_html = render_pm_ytd_tracker_html(tracker_data, current_year, cfg)
-            html = build_brief_html(filings, cfg, ytd_tracker_html=ytd_html, show_jump_btn=True)
+            brief_output = build_brief_html(filings, cfg, ytd_tracker_html=ytd_html, show_jump_btn=True)
         else:
             response = (
                 supabase.table(cfg["source_table"])
@@ -435,10 +440,10 @@ def run():
             )
             filings = response.data or []
             print(f"[{vertical_key}] Loaded {len(filings)} filings from {cfg['source_table']}.")
-            html = build_brief_html(filings, cfg)
+            brief_output = build_brief_html(filings, cfg)
 
         with open(cfg["output_file"], "w", encoding="utf-8") as f:
-            f.write(html)
+            f.write(brief_output)
         print(f"[{vertical_key}] Generated {cfg['output_file']} successfully.")
 
 
