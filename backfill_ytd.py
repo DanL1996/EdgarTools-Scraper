@@ -117,7 +117,8 @@ def run():
     print(f"Found {len(filings)} total matching filings in {target_year}. Will inspect up to {max_inspect} NEW filings...")
 
     # Pre-load all existing accession numbers in one query for instant deduplication
-    existing_resp = supabase.table("sec_filings").select("accession_number").execute()
+    existing_resp = supabase.table("sec_filings").select("accession_number").execute(),existing_accs.add(acc_num)
+
     existing_accs = {row["accession_number"] for row in (existing_resp.data or [])}
     print(f"Loaded {len(existing_accs)} existing records from Supabase to skip.")
 
@@ -131,7 +132,7 @@ def run():
 
         acc_num = filing.accession_number
         if acc_num in existing_accs:
-            skipped_existing += 1
+                      skipped_existing += 1
             continue
 
         new_checked += 1
@@ -139,11 +140,13 @@ def run():
         try:
             text = filing.text()
             if not text:
+                existing_accs.add(acc_num)
                 continue
 
             extraction = analyze_filing(filing.form, text)
             if not extraction.is_actionable:
                 print(f"Skipping non-actionable {filing.form} ({acc_num})")
+                existing_accs.add(acc_num)
                 continue
 
             row = {
@@ -165,14 +168,20 @@ def run():
                 "distributor_or_admin": extraction.distributor_or_admin,
                 "verbatim_key_excerpt": extraction.verbatim_key_excerpt,
                 "raw_payload": extraction.model_dump(),
-
             }
 
             supabase.table("sec_filings").upsert(row).execute()
+            existing_accs.add(acc_num)
             inserted_count += 1
             print(f"[{extraction.vertical}] {filing.filing_date} | {filing.form}: {extraction.fund_name or extraction.trust_or_registrant_name}")
 
         except Exception as e:
+            err_str = str(e)
+            print(f"Error processing {acc_num}: {err_str}")
+            if "credit balance is too low" in err_str or "authentication_error" in err_str:
+                print("Stopping backfill immediately due to Anthropic API billing/auth error.")
+                break
+
             print(f"Error processing {acc_num}: {e}")
 
     print(f"Backfill complete. Inserted: {inserted_count} | Already in DB: {skipped_existing}")
