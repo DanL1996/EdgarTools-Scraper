@@ -12,7 +12,7 @@ PM_WEEKLY_DAY = 4  # Friday
 EDITIONS = {
     "etf_launches": {
         "output_file": "brief_launches.html",
-        "source_table": "etf_email_filings",
+        "source_table": "sec_filings",
         "kicker": "1940-Act Regulatory Intelligence",
         "title": "ETF & Fund Launch Brief",
         "subtitle": "New ETF & Mutual Fund Launches, Conversions, and Exemptive Relief Applications",
@@ -423,14 +423,16 @@ def run():
             tracker_data = fetch_pm_ytd_tracker(current_year)
             ytd_html = render_pm_ytd_tracker_html(tracker_data, current_year, cfg)
             html = build_brief_html(filings, cfg, ytd_tracker_html=ytd_html, show_jump_btn=True)
-        else:
+                else:
             response = (
                 supabase.table(cfg["source_table"])
                 .select("*")
+                .eq("vertical", vertical_key)
                 .order("filing_date", desc=True)
                 .limit(15)
                 .execute()
             )
+
             filings = response.data or []
             print(f"[{vertical_key}] Loaded {len(filings)} filings from {cfg['source_table']}.")
             html = build_brief_html(filings, cfg)
