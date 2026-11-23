@@ -117,10 +117,11 @@ def run():
     print(f"Found {len(filings)} total matching filings in {target_year}. Will inspect up to {max_inspect} NEW filings...")
 
     # Pre-load all existing accession numbers in one query for instant deduplication
-    existing_resp = supabase.table("sec_filings").select("accession_number").execute(),existing_accs.add(acc_num)
+        existing_resp = 
+    supabase.table("sec_filings").select("accession_number").execute()
+        existing_accs = {row["accession_number"] for row in (existing_resp.data or [])}
+        print(f"Loaded {len(existing_accs)} existing records from Supabase to skip.")
 
-    existing_accs = {row["accession_number"] for row in (existing_resp.data or [])}
-    print(f"Loaded {len(existing_accs)} existing records from Supabase to skip.")
 
     inserted_count = 0
     skipped_existing = 0
