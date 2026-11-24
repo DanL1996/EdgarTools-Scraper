@@ -348,7 +348,10 @@ def render_pm_ytd_tracker_html(tracker: dict, current_year: int, cfg: dict) -> s
         </tbody>
       </table>
     </div>
-    """
+      <div style="font-size:11px;color:#64748b;margin-top:8px;">
+        *Total includes initial Form N-2 launches, N-2/A registration amendments, and 40-APP exemptive relief applications.
+      </div>
+
 
 
 def build_brief_html(
