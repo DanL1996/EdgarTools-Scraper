@@ -123,7 +123,7 @@ def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
 
     response = anthropic_client.messages.parse(
         model="claude-sonnet-5-5",
-        max_tokens=1200,
+        max_tokens=2048,
         system=(
             "You are a senior 1940-Act & Digital Asset regulatory intelligence analyst writing for ETF/mutual fund executives, "
             "alternative asset managers, fund service providers, and 1940-Act legal counsel. Extract exact facts from the SEC filing. "
@@ -220,4 +220,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-
