@@ -12,26 +12,31 @@ set_identity(os.environ["EDGAR_IDENTITY"])
 anthropic_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
-TARGET_FORMS = ["N-1A", "485APOS", "485BPOS", "N-2", "N-2/A", "40-APP"]
+TARGET_FORMS = ["N-1A", "485APOS", "485BPOS", "N-2", "N-2/A", "40-APP", "S-1"]
 
 
-# 2. Define strict extraction schema for 1940-Act regulatory intelligence
+# 2. Define strict extraction schema for 1940-Act & Digital Asset regulatory intelligence
 class FilingExtraction(BaseModel):
     is_actionable: bool = Field(
-        description="True ONLY if this filing represents a new fund/ETF launch, new series registration, mutual-fund-to-ETF conversion, closed-end/interval/tender-offer fund launch, or 1940-Act exemptive relief application. False for routine annual prospectus updates with no new series/strategy."
+        description=(
+            "True ONLY if this filing represents a new fund/ETF launch, new series registration, "
+            "mutual-fund-to-ETF conversion, closed-end/interval/tender-offer fund launch, "
+            "spot/staked crypto or tokenized ETP registration (S-1), or 1940-Act exemptive relief application. "
+            "False for routine annual prospectus updates with no new series/strategy, and false for non-fund corporate/operating-company S-1 IPOs."
+        )
     )
     vertical: Literal["etf_launches", "private_markets"] = Field(
         description=(
             "Route to 'private_markets' if this is an N-2 or N-2/A filing (interval fund, tender offer fund, non-traded BDC, closed-end fund), "
-            "a 40-APP seeking co-investment relief (Section 17(d)/57(i)) or multi-class interval/tender-offer fund relief, "
-            "or an N-1A/485 filing whose primary strategy allocates >15% to private credit, private equity, venture capital, infrastructure, or unlisted secondaries. "
-            "Route all standard ETFs, mutual-fund-to-ETF conversions, and standard ETF exemptive relief to 'etf_launches'."
+            "a 40-APP seeking co-investment relief (Section 17(d)/57(i)) or multi-class interval/tender-offer/tokenized share-class relief, "
+            "an on-chain money-market/Treasury fund, or an N-1A/485 filing whose primary strategy allocates >15% to private credit, private equity, venture capital, infrastructure, or unlisted secondaries. "
+            "Route all standard ETFs, spot/staked crypto ETPs (S-1/N-1A), mutual-fund-to-ETF conversions, and standard ETF exemptive relief to 'etf_launches'."
         )
     )
     brief_category: str = Field(
         description=(
-            "If vertical is 'etf_launches', choose one of: 'New Fund Launch', 'ETF Conversion / Material Amendment', 'Exemptive Relief Application', or 'Routine Update'. "
-            "If vertical is 'private_markets', choose one of: 'New Interval / Tender Offer Fund', 'Private Credit / PE ETF Launch', 'Co-Investment & Multi-Class Relief', or 'Routine Update'."
+            "If vertical is 'etf_launches', choose one of: 'New Fund Launch', 'ETF Conversion / Material Amendment', 'Exemptive Relief Application', 'Tokenized / Digital Asset Fund', or 'Routine Update'. "
+            "If vertical is 'private_markets', choose one of: 'New Interval / Tender Offer Fund', 'Private Credit / PE ETF Launch', 'Co-Investment & Multi-Class Relief', 'Tokenized / Digital Asset Fund', or 'Routine Update'."
         )
     )
     trust_or_registrant_name: Optional[str] = Field(
@@ -40,7 +45,7 @@ class FilingExtraction(BaseModel):
     )
     fund_name: Optional[str] = Field(
         default=None,
-        description="Specific name(s) of the new fund(s) or ETF(s) being launched or applying for relief."
+        description="Specific name(s) of the new fund(s) or ETF(s)/ETP(s) being launched or applying for relief."
     )
     investment_adviser: Optional[str] = Field(
         default=None,
@@ -60,7 +65,7 @@ class FilingExtraction(BaseModel):
     )
     strategy_asset_class: Optional[str] = Field(
         default=None,
-        description="Concise 1-sentence description of the fund's investment strategy, wrapper (Active ETF, Index ETF, Interval Fund, Tender Offer Fund, BDC), or exemptive relief requested."
+        description="Concise 1-sentence description of the fund's investment strategy, wrapper (Active ETF, Index ETF, Spot/Staked Crypto ETP, Interval Fund, Tender Offer Fund, BDC), or exemptive relief requested."
     )
     management_fee: Optional[str] = Field(
         default=None,
@@ -68,7 +73,7 @@ class FilingExtraction(BaseModel):
     )
     listing_exchange: Optional[str] = Field(
         default=None,
-        description="Target listing exchange for ETFs/CEFs (e.g., 'NYSE Arca', 'Nasdaq', 'Cboe BZX'), or null if unlisted interval/tender-offer fund or TBD."
+        description="Target listing exchange for ETFs/ETPs/CEFs (e.g., 'NYSE Arca', 'Nasdaq', 'Cboe BZX'), or null if unlisted interval/tender-offer fund or TBD."
     )
     distributor_or_admin: Optional[str] = Field(
         default=None,
@@ -76,7 +81,39 @@ class FilingExtraction(BaseModel):
     )
     verbatim_key_excerpt: Optional[str] = Field(
         default=None,
-        description="Exact 1-2 sentence verbatim quote from the filing summarizing the new fund objective, repurchase policy, or relief sought."
+        description="Exact 1-2 sentence verbatim quote from the filing summarizing the new fund objective, repurchase policy, tokenized structure, or relief sought."
+    )
+    # --- Tokenization & Digital Asset Fields ---
+    is_tokenized: bool = Field(
+        default=False,
+        description=(
+            "True ONLY if this filing genuinely registers or seeks exemptive relief for a tokenized share class, "
+            "on-chain money market/Treasury fund, spot/staked crypto ETP, or tokenized interval/private fund. "
+            "False if crypto/digital assets are merely mentioned in generic boilerplate risk factors."
+        )
+    )
+    tokenization_type: Optional[
+        Literal[
+            "Tokenized Share Class",
+            "On-Chain MMF/Treasury",
+            "Spot/Staked Crypto ETP",
+            "Tokenized Private/Interval Fund",
+        ]
+    ] = Field(
+        default=None,
+        description="Category of tokenized or digital asset fund if is_tokenized is True, otherwise null."
+    )
+    digital_transfer_agent: Optional[str] = Field(
+        default=None,
+        description="Normalized digital transfer agent or tokenization platform if disclosed (e.g., 'Securitize', 'Superstate', 'Franklin Templeton', 'Taurus', 'Tokeny', 'BNY Mellon', 'State Street'), or null."
+    )
+    crypto_custodian: Optional[str] = Field(
+        default=None,
+        description="Normalized qualified crypto/digital asset custodian if disclosed (e.g., 'Coinbase Custody', 'Anchorage Digital', 'BitGo', 'Fireblocks', 'BNY Mellon', 'Fidelity Digital Assets'), or null."
+    )
+    blockchain_network: Optional[str] = Field(
+        default=None,
+        description="Blockchain network(s) named for on-chain recordkeeping or settlement (e.g., 'Ethereum', 'Solana', 'Stellar', 'Polygon', 'Avalanche', 'Multi-Chain'), or null."
     )
 
 
@@ -86,11 +123,12 @@ def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
 
     response = anthropic_client.messages.parse(
         model="claude-sonnet-5-5",
-        max_tokens=1024,
+        max_tokens=1200,
         system=(
-            "You are a senior 1940-Act regulatory intelligence analyst writing for ETF/mutual fund executives, "
+            "You are a senior 1940-Act & Digital Asset regulatory intelligence analyst writing for ETF/mutual fund executives, "
             "alternative asset managers, fund service providers, and 1940-Act legal counsel. Extract exact facts from the SEC filing. "
-            "Never guess or invent names, fees, or exchanges—if a field is blank or '[__]', return null."
+            "Never guess or invent names, fees, or exchanges—if a field is blank or '[__]', return null. "
+            "For S-1 filings, mark is_actionable=True ONLY if the registrant is a crypto/digital-asset ETP or investment fund (ignore standard corporate IPOs)."
         ),
         messages=[
             {
@@ -105,7 +143,7 @@ def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
 
 def run():
     since_date = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
-    print(f"Fetching 1940-Act filings since {since_date}...")
+    print(f"Fetching 1940-Act & Digital Asset filings since {since_date}...")
 
     filings = get_filings(form=TARGET_FORMS, filing_date=f"{since_date}:")
     recent_filings = filings.head(40)
@@ -131,6 +169,12 @@ def run():
             if not text:
                 continue
 
+            # Fast pre-filter for S-1s so we don't spend Sonnet tokens on non-fund corporate IPOs
+            if filing.form == "S-1":
+                lower_head = text[:15000].lower()
+                if not any(k in lower_head for k in ("bitcoin", "ethereum", "solana", "digital asset", "crypto", "tokeniz", "trust", "etf", "etp")):
+                    continue
+
             extraction = analyze_filing(filing.form, text)
 
             if not extraction.is_actionable:
@@ -155,12 +199,18 @@ def run():
                 "listing_exchange": extraction.listing_exchange,
                 "distributor_or_admin": extraction.distributor_or_admin,
                 "verbatim_key_excerpt": extraction.verbatim_key_excerpt,
+                "is_tokenized": extraction.is_tokenized,
+                "tokenization_type": extraction.tokenization_type,
+                "digital_transfer_agent": extraction.digital_transfer_agent,
+                "crypto_custodian": extraction.crypto_custodian,
+                "blockchain_network": extraction.blockchain_network,
                 "raw_payload": extraction.model_dump(),
             }
 
             supabase.table("sec_filings").upsert(row).execute()
             inserted_count += 1
-            print(f"[{extraction.vertical}] Inserted {filing.form}: {extraction.fund_name or extraction.trust_or_registrant_name}")
+            tok_badge = f" [TOKENIZED: {extraction.tokenization_type}]" if extraction.is_tokenized else ""
+            print(f"[{extraction.vertical}]{tok_badge} Inserted {filing.form}: {extraction.fund_name or extraction.trust_or_registrant_name}")
 
         except Exception as e:
             print(f"Error processing {acc_num}: {e}")
@@ -170,3 +220,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+
