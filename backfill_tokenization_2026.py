@@ -7,12 +7,11 @@ from edgar import set_identity, get_filings
 from anthropic import Anthropic
 from supabase import create_client
 
-# 1. Initialize clients (matching scraper.py)
+# 1. Initialize clients
 set_identity(os.environ["EDGAR_IDENTITY"])
 anthropic_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
-# Regex pre-filter: requires >=2 distinct tokenization/digital-asset keywords before calling Claude
 TOK_REGEX = re.compile(
     r"\b("
     r"tokeniz\w+|blockchain|distributed ledger|on-chain|onchain|smart contract|"
@@ -28,7 +27,6 @@ WINDOW_REGEX = re.compile(
 )
 
 
-# 2. Strict Pydantic extraction schema for Tokenization & Digital Asset filings
 class TokenizationExtraction(BaseModel):
     is_tokenized: bool = Field(
         description=(
@@ -58,31 +56,15 @@ class TokenizationExtraction(BaseModel):
     trust_or_registrant_name: Optional[str] = Field(default=None)
     fund_name: Optional[str] = Field(default=None)
     investment_adviser: Optional[str] = Field(default=None)
-    legal_counsel_firm: Optional[str] = Field(
-        default=None,
-        description="Normalized outside law firm (e.g., 'Dechert LLP', 'Ropes & Gray LLP', 'Stradley Ronon Stevens & Young, LLP', 'Cahill Gordon & Reindel LLP', 'Chapman and Cutler LLP')."
-    )
-    digital_transfer_agent: Optional[str] = Field(
-        default=None,
-        description="Normalized digital transfer agent / tokenization platform (e.g., 'Securitize', 'Superstate', 'Franklin Templeton', 'Taurus', 'Tokeny', 'BNY Mellon', 'State Street')."
-    )
-    crypto_custodian: Optional[str] = Field(
-        default=None,
-        description="Normalized qualified crypto custodian (e.g., 'Coinbase Custody', 'Anchorage Digital', 'BitGo', 'Fireblocks', 'BNY Mellon', 'Fidelity Digital Assets')."
-    )
-    blockchain_network: Optional[str] = Field(
-        default=None,
-        description="Blockchain network(s) named (e.g., 'Ethereum', 'Solana', 'Stellar', 'Polygon', 'Avalanche', 'Multi-Chain')."
-    )
+    legal_counsel_firm: Optional[str] = Field(default=None)
+    digital_transfer_agent: Optional[str] = Field(default=None)
+    crypto_custodian: Optional[str] = Field(default=None)
+    blockchain_network: Optional[str] = Field(default=None)
     strategy_asset_class: Optional[str] = Field(default=None)
-    verbatim_key_excerpt: Optional[str] = Field(
-        default=None,
-        description="Exact 1-2 sentence verbatim quote summarizing the tokenized structure, digital transfer agent, or digital asset strategy."
-    )
+    verbatim_key_excerpt: Optional[str] = Field(default=None)
 
 
 def slice_relevant_windows(text: str, max_chars: int = 12000) -> str:
-    """Slices cover page + ±1,600-char windows around service-provider and tokenization mentions."""
     snippets = [text[:3200]]
     spans = [(0, 3200)]
     for m in WINDOW_REGEX.finditer(text):
@@ -117,70 +99,30 @@ def analyze_tokenization(form_type: str, filing_text: str) -> TokenizationExtrac
 
 
 def run_backfill():
-    # Step A: Evaluate existing 2026 rows already in public.sec_filings first
-    print("Checking existing 2026 rows in public.sec_filings...")
-    existing_res = (
-        supabase.table("sec_filings")
-        .select("*")
-        .gte("filing_date", "2026-01-01")
-        .is_("tokenization_type", "null")
-        .execute()
-    )
+    print("Scanning Jan 1, 2026 - Jun 15, 2026 EDGAR filings for Tokenized & Digital Asset products...", flush=True)
+    filings = get_filings(form=["N-1A", "N-2", "S-1", "40-APP"], filing_date="2026-01-01:2026-06-15")
+    print(f"Total candidate filings in Jan-Jun 2026 range: {len(filings)}", flush=True)
 
-    tagged_existing = 0
     seen_funds = set()
-
-    for row in existing_res.data:
-        blob = " ".join(
-            filter(
-                None,
-                [
-                    row.get("fund_name"),
-                    row.get("strategy_asset_class"),
-                    row.get("verbatim_key_excerpt"),
-                    json.dumps(row.get("raw_payload") or {}),
-                ],
-            )
-        )
-        hits = {m.group(0).lower() for m in TOK_REGEX.finditer(blob)}
-        if len(hits) < 2:
-            continue
-
-        dedup = (row.get("fund_name") or row.get("trust_or_registrant_name") or row["accession_number"]).strip().lower()
-        if dedup in seen_funds:
-            continue
-        seen_funds.add(dedup)
-
-        try:
-            extraction = analyze_tokenization(row["form_type"], blob)
-        except Exception as e:
-            print(f"Skipping {row['accession_number']} due to parse error: {e}")
-            continue
-
-        if extraction.is_tokenized:
-            update_data = {
-                "is_tokenized": True,
-                "tokenization_type": extraction.tokenization_type,
-                "digital_transfer_agent": extraction.digital_transfer_agent,
-                "crypto_custodian": extraction.crypto_custodian,
-                "blockchain_network": extraction.blockchain_network,
-            }
-            if not row.get("legal_counsel_firm") and extraction.legal_counsel_firm:
-                update_data["legal_counsel_firm"] = extraction.legal_counsel_firm
-
-            supabase.table("sec_filings").update(update_data).eq(
-                "accession_number", row["accession_number"]
-            ).execute()
-            tagged_existing += 1
-            print(f"[DB Update] Tagged {row.get('fund_name') or row['accession_number']} -> {extraction.tokenization_type}")
-
-    # Step B: Pull 2026 S-1 / N-1A / N-2 / 40-APP filings from EDGAR (including S-1 crypto ETPs not in scraper.py)
-    print("Scanning 2026 EDGAR filings (Jan 1, 2026 - Present) for Tokenized & Digital Asset products...")
-    filings = get_filings(form=["N-1A", "N-2", "S-1", "40-APP"], filing_date="2026-01-01:")
-    print(f"Total 2026 candidate filings in range: {len(filings)}")
-
     inserted_new = 0
-    for filing in filings:
+
+    for idx, filing in enumerate(filings, 1):
+        if idx % 50 == 0:
+            print(f"Progress: scanned {idx}/{len(filings)} filings ({inserted_new} inserted)...", flush=True)
+
+        # Skip non-fund corporate S-1 IPOs in 0ms before downloading full filing text
+        if filing.form == "S-1":
+            comp = (filing.company or "").lower()
+            if not any(
+                k in comp
+                for k in (
+                    "trust", "etf", "etp", "fund", "bitcoin", "ethereum", "solana",
+                    "crypto", "digital", "token", "coin", "blockchain", "asset",
+                    "capital", "shares", "strategy", "treasury",
+                )
+            ):
+                continue
+
         acc_num = filing.accession_number
         check = (
             supabase.table("sec_filings")
@@ -231,12 +173,16 @@ def run_backfill():
             }
             supabase.table("sec_filings").upsert(new_row).execute()
             inserted_new += 1
-            print(f"[EDGAR Backfill] Inserted {filing.form}: {extraction.fund_name or extraction.trust_or_registrant_name} ({extraction.tokenization_type})")
+            print(
+                f"[EDGAR Backfill] Inserted {filing.form} ({filing.filing_date}): "
+                f"{extraction.fund_name or extraction.trust_or_registrant_name} ({extraction.tokenization_type})",
+                flush=True,
+            )
 
         except Exception as e:
-            print(f"Error on {acc_num}: {e}")
+            print(f"Error on {acc_num}: {e}", flush=True)
 
-    print(f"Done! Tagged {tagged_existing} existing rows and inserted {inserted_new} new 2026 tokenized filings.")
+    print(f"Done! Inserted {inserted_new} new Jan-Jun 2026 tokenized filings.", flush=True)
 
 
 if __name__ == "__main__":
