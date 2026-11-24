@@ -124,7 +124,7 @@ def run_backfill():
         msg = claude.messages.create(
             model="claude-haiku-5-5",
             max_tokens=400,
-            temperature=0,
+            
             messages=[{"role": "user", "content": f"{PROMPT}\n\nFILING TEXT:\n{condensed}"}],
         )
         raw_json = re.sub(r"^```json|```$", "", msg.content[0].text.strip()).strip()
