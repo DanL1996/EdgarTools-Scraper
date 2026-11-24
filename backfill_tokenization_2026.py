@@ -100,7 +100,7 @@ def analyze_tokenization(form_type: str, filing_text: str) -> TokenizationExtrac
     condensed = slice_relevant_windows(filing_text)
     response = anthropic_client.messages.parse(
         model="claude-haiku-5-5",
-        max_tokens=700,
+        max_tokens=2048,
         system=(
             "You are an institutional 1940-Act & Digital Asset SEC filing analyst. "
             "Extract exact facts from the SEC filing excerpts. Never guess or invent entity names—return null if undisclosed."
@@ -151,7 +151,12 @@ def run_backfill():
             continue
         seen_funds.add(dedup)
 
-        extraction = analyze_tokenization(row["form_type"], blob)
+        try:
+            extraction = analyze_tokenization(row["form_type"], blob)
+        except Exception as e:
+            print(f"Skipping {row['accession_number']} due to parse error: {e}")
+            continue
+
         if extraction.is_tokenized:
             update_data = {
                 "is_tokenized": True,
@@ -236,4 +241,3 @@ def run_backfill():
 
 if __name__ == "__main__":
     run_backfill()
-
