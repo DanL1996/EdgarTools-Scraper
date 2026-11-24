@@ -1,7 +1,7 @@
 name: Backfill 2026 Tokenization Filings
 
 on:
-  workflow_dispatch:  # Lets you click "Run workflow" manually whenever you want
+  workflow_dispatch:
 
 jobs:
   run-backfill:
@@ -25,7 +25,7 @@ jobs:
       - name: Run 2026 Tokenization Backfill
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          SEC_USER_AGENT: ${{ secrets.SEC_USER_AGENT }}
+          EDGAR_IDENTITY: ${{ secrets.EDGAR_IDENTITY }}
         run: python backfill_tokenization_2026.py
