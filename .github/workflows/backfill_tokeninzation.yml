@@ -24,8 +24,8 @@ jobs:
 
       - name: Run 2026 Tokenization Backfill
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           EDGAR_IDENTITY: ${{ secrets.EDGAR_IDENTITY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          SUPABASE_URL: ${{ secrets.SUBBASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUBBASE_SECRET }}
         run: python backfill_tokenization_2026.py
