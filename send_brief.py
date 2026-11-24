@@ -347,11 +347,11 @@ def render_pm_ytd_tracker_html(tracker: dict, current_year: int, cfg: dict) -> s
           {sponsor_rows or '<tr><td colspan="4" style="padding:10px;font-size:12.5px;color:#64748b;">No sponsor data recorded yet for this year.</td></tr>'}
         </tbody>
       </table>
-    </div>
       <div style="font-size:11px;color:#64748b;margin-top:8px;">
         *Total includes initial Form N-2 launches, N-2/A registration amendments, and 40-APP exemptive relief applications.
       </div>
-
+    </div>
+    """
 
 
 def build_brief_html(
