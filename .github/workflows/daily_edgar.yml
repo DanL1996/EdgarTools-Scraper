@@ -40,3 +40,17 @@ jobs:
           path: |
             brief_launches.html
             brief_private_markets.html
+
+      - name: Generate Tokenization HTML Previews
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+        run: python -u preview_tokenization_emails.py
+
+      - name: Upload HTML Previews
+        uses: actions/upload-artifact@v4
+        with:
+          name: tokenization-email-previews
+          path: preview_*.html
+ 
+ 
