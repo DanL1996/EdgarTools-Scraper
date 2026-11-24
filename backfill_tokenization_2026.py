@@ -176,7 +176,7 @@ def run_backfill():
 
     # Step B: Pull 2026 S-1 / N-1A / N-2 / 40-APP filings from EDGAR (including S-1 crypto ETPs not in scraper.py)
     print("Scanning 2026 EDGAR filings (Jan 1, 2026 - Present) for Tokenized & Digital Asset products...")
-    filings = get_filings(form=["N-1A", "N-2", "S-1", "40-APP", "485APOS", "485BPOS"], filing_date="2026-01-01:")
+    filings = get_filings(form=["N-1A", "N-2", "S-1", "40-APP"], filing_date="2026-01-01:")
     print(f"Total 2026 candidate filings in range: {len(filings)}")
 
     inserted_new = 0
