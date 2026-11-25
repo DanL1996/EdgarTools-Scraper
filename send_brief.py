@@ -168,29 +168,19 @@ def render_filing_card(row: dict, cfg: dict) -> str:
 
 
 def render_lead_or_editorial(vertical_key: str, cfg: dict, filing_count: int) -> str:
-    """Renders top editorial commentary if provided; otherwise renders concise filing count."""
+    """Renders top editorial commentary only when editor_note is populated; otherwise renders nothing."""
     note = (cfg.get("editor_note") or "").strip()
-    if note:
-        label = html.escape(str(cfg.get("editor_note_label") or "DESK NOTE"))
-        return f"""
-        <div style="margin-top:14px;margin-bottom:6px;padding:14px 16px;background:#f8fafc;border-left:4px solid {cfg['accent_color']};border-radius:0 4px 4px 0;">
-          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:{cfg['accent_color']};margin-bottom:5px;">
-            {label}
-          </div>
-          <div style="font-size:13.5px;color:#1e293b;line-height:1.55;">
-            {note}
-          </div>
-        </div>
-        """
-
-    if vertical_key == "private_markets":
-        summary = f"Tracking <strong>{filing_count} new 1940-Act registrations</strong>, structural amendments, and exemptive applications."
-    else:
-        summary = f"Tracking <strong>{filing_count} new ETF registrations</strong>, post-effective launches, crypto ETPs, and share-class filings."
-
+    if not note:
+        return ""
+    label = html.escape(str(cfg.get("editor_note_label") or "DESK NOTE"))
     return f"""
-    <div style="font-size:13.5px;color:#475569;margin-top:12px;line-height:1.5;">
-      {summary}
+    <div style="margin-top:16px;margin-bottom:4px;padding:14px 16px;background:#f8fafc;border-left:4px solid {cfg['accent_color']};border-radius:0 4px 4px 0;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:{cfg['accent_color']};margin-bottom:5px;">
+        {label}
+      </div>
+      <div style="font-size:13.5px;color:#1e293b;line-height:1.55;">
+        {note}
+      </div>
     </div>
     """
 
@@ -666,3 +656,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+
