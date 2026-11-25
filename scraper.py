@@ -199,7 +199,7 @@ def get_since_date() -> str:
     explicit_since = (os.environ.get("SCRAPER_SINCE_DATE") or "").strip()
     if explicit_since:
         return explicit_since
-    lookback_days = int(os.environ.get("SCRAPER_LOOKBACK_DAYS", "3"))
+    lookback_days = int(os.environ.get("SCRAPER_LOOKBACK_DAYS", "7"))
     return (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
 
 
