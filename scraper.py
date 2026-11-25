@@ -2,15 +2,22 @@ import os
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
+
+print("[boot] Importing pydantic, edgartools, anthropic, supabase...", flush=True)
 from pydantic import BaseModel, Field
 from edgar import set_identity, get_filings
 from anthropic import Anthropic
 from supabase import create_client
 
-# 1. Initialize clients
+print("[boot] Initializing clients...", flush=True)
 set_identity(os.environ["EDGAR_IDENTITY"])
+print("[boot] EDGAR identity set.", flush=True)
+
 anthropic_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+print("[boot] Anthropic client ready.", flush=True)
+
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
+print("[boot] Supabase client ready.", flush=True)
 
 TARGET_FORMS = [
     "N-1A",
@@ -65,7 +72,6 @@ def looks_like_bdc_filing(filing, head_text: str) -> bool:
     return any(re.search(pat, head_text) for pat in bdc_patterns)
 
 
-# 2. Define strict extraction schema for 1940-Act & Digital Asset regulatory intelligence
 class FilingExtraction(BaseModel):
     is_actionable: bool = Field(
         description=(
@@ -89,7 +95,7 @@ class FilingExtraction(BaseModel):
     brief_category: str = Field(
         description=(
             "If vertical is 'etf_launches', choose one of: 'New Fund Launch', 'ETF Conversion / Material Amendment', 'Exemptive Relief Application', 'Tokenized / Digital Asset Fund', or 'Routine Update'. "
-            "If vertical is 'private_markets', choose one of: 'New Interval / Tender Offer Fund', 'Private Credit / PE ETF Launch', 'Co-Investment & Multi-Class Relief', 'Tokenized / Digital Asset Fund', or 'Routine Update'."
+            "If vertical is 'private_markets', choose one of: 'Interval & Tender Offer Funds', 'Private Credit / PE ETF Launch', 'Co-Investment & Multi-Class Relief', 'Tokenized / Digital Asset Fund', or 'Routine Update'."
         )
     )
     trust_or_registrant_name: Optional[str] = Field(
@@ -136,7 +142,6 @@ class FilingExtraction(BaseModel):
         default=None,
         description="Exact 1-2 sentence verbatim quote from the filing summarizing the new fund/BDC objective, repurchase policy, tokenized structure, or relief sought."
     )
-    # --- Tokenization & Digital Asset Fields ---
     is_tokenized: bool = Field(
         default=False,
         description=(
@@ -206,18 +211,19 @@ def get_since_date() -> str:
 def run():
     since_date = get_since_date()
     max_filings = int(os.environ.get("SCRAPER_MAX_FILINGS", "80"))
-    print(f"Fetching 1940-Act, BDC & Digital Asset filings since {since_date}...")
+    print(f"[run] Fetching filings since {since_date} (max={max_filings})...", flush=True)
 
     filings = get_filings(form=TARGET_FORMS, filing_date=f"{since_date}:")
+    print("[run] get_filings() returned; slicing head...", flush=True)
     recent_filings = filings.head(max_filings)
-    print(f"Inspecting {len(recent_filings)} filings...")
+    print(f"[run] Inspecting {len(recent_filings)} filings...", flush=True)
 
     inserted_count = 0
 
-    for filing in recent_filings:
+    for i, filing in enumerate(recent_filings, start=1):
         acc_num = filing.accession_number
+        print(f"[{i}/{len(recent_filings)}] Checking {filing.form} ({acc_num})...", flush=True)
 
-        # Check if already processed in Supabase
         existing = (
             supabase.table("sec_filings")
             .select("accession_number")
@@ -225,45 +231,47 @@ def run():
             .execute()
         )
         if existing.data:
+            print(f"[{i}/{len(recent_filings)}] Already in DB, skipping {acc_num}.", flush=True)
             continue
 
         try:
+            print(f"[{i}/{len(recent_filings)}] Downloading text for {acc_num}...", flush=True)
             text = filing.text()
             if not text:
+                print(f"[{i}/{len(recent_filings)}] Empty text for {acc_num}, skipping.", flush=True)
                 continue
 
             lower_head = text[:15000].lower()
 
-            # Fast pre-filter for S-1s so we don't spend tokens on non-fund corporate IPOs
             if filing.form == "S-1":
                 if not any(k in lower_head for k in ("bitcoin", "ethereum", "solana", "digital asset", "crypto", "tokeniz", "trust", "etf", "etp")):
+                    print(f"[{i}/{len(recent_filings)}] Pre-filtered non-fund S-1 ({acc_num}).", flush=True)
                     continue
 
-            # Fast pre-filter for 10-12G / 10-12G/A / N-6F / N-54A so non-BDC corporate filers are skipped
             if filing.form in BDC_FORMS:
                 if not looks_like_bdc_filing(filing, lower_head):
+                    print(f"[{i}/{len(recent_filings)}] Pre-filtered non-BDC {filing.form} ({acc_num}).", flush=True)
                     continue
 
-            # Fast pre-filter for 40-APPs to exclude Investment Advisers Act pay-to-play / family office filings
             if filing.form == "40-APP":
                 if any(k in lower_head for k in ("206(4)-5", "pay-to-play", "pay to play", "political contribution", "202(a)(11)(g)", "family office")):
-                    print(f"Skipping Advisers Act 40-APP ({acc_num})")
+                    print(f"[{i}/{len(recent_filings)}] Skipping Advisers Act 40-APP ({acc_num}).", flush=True)
                     continue
 
+            print(f"[{i}/{len(recent_filings)}] Running Claude extraction on {filing.form} ({acc_num})...", flush=True)
             extraction = analyze_filing(filing.form, text)
 
             if not extraction.is_actionable:
-                print(f"Skipping non-actionable {filing.form} ({acc_num})")
+                print(f"[{i}/{len(recent_filings)}] Non-actionable {filing.form} ({acc_num}).", flush=True)
                 continue
 
             vertical = extraction.vertical
             brief_category = extraction.brief_category
 
-            # Ensure BDC form filings always route cleanly to private_markets
             if filing.form in BDC_FORMS:
                 vertical = "private_markets"
                 if brief_category == "Routine Update":
-                    brief_category = "New Interval / Tender Offer Fund"
+                    brief_category = "Interval & Tender Offer Funds"
 
             counsel_firm = normalize_law_firm(extraction.legal_counsel_firm)
 
@@ -296,12 +304,12 @@ def run():
             supabase.table("sec_filings").upsert(row).execute()
             inserted_count += 1
             tok_badge = f" [TOKENIZED: {extraction.tokenization_type}]" if extraction.is_tokenized else ""
-            print(f"[{vertical}]{tok_badge} Inserted {filing.form}: {extraction.fund_name or extraction.trust_or_registrant_name}")
+            print(f"[{vertical}]{tok_badge} Inserted {filing.form}: {extraction.fund_name or extraction.trust_or_registrant_name}", flush=True)
 
         except Exception as e:
-            print(f"Error processing {acc_num}: {e}")
+            print(f"Error processing {acc_num}: {e}", flush=True)
 
-    print(f"Done. Inserted {inserted_count} new actionable filings.")
+    print(f"Done. Inserted {inserted_count} new actionable filings.", flush=True)
 
 
 if __name__ == "__main__":
