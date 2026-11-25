@@ -1,3 +1,4 @@
+import json
 import os
 import re
 from datetime import datetime, timedelta, timezone
@@ -93,15 +94,37 @@ class FilingExtraction(BaseModel):
 def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
     excerpt = filing_text[:28000]
 
-    response = anthropic_client.messages.parse(
+    response = anthropic_client.messages.create(
         model="claude-sonnet-5-5",
         max_tokens=2048,
         system=(
             "You are a senior 1940-Act & Digital Asset regulatory intelligence analyst. Extract exact facts from the SEC filing. "
-            "Never guess or invent names, fees, or exchanges—if blank or '[__]', return null. "
-            "For S-1 filings, mark is_actionable=True ONLY for crypto/digital-asset ETPs or investment funds. "
-            "For 10-12G / 10-12G/A / N-6F / N-54A filings, mark is_actionable=True ONLY for BDCs or investment vehicles. "
-            "For 40-APP filings, mark is_actionable=False for Investment Advisers Act filings (Rule 206(4)-5 pay-to-play or family office exemptions)."
+            "Never guess or invent names, fees, or exchanges—if blank or '[__]', use null. "
+            "For S-1 filings, set is_actionable=true ONLY for crypto/digital-asset ETPs or investment funds. "
+            "For 10-12G / 10-12G/A / N-6F / N-54A filings, set is_actionable=true ONLY for BDCs or investment vehicles. "
+            "For 40-APP filings, set is_actionable=false for Investment Advisers Act filings (Rule 206(4)-5 pay-to-play or family office exemptions). "
+            "Respond ONLY with a single valid JSON object (no markdown fences, no commentary) matching these keys:\n"
+            "{"
+            '"is_actionable": bool, '
+            '"vertical": "etf_launches" | "private_markets", '
+            '"brief_category": str, '
+            '"trust_or_registrant_name": str | null, '
+            '"fund_name": str | null, '
+            '"investment_adviser": str | null, '
+            '"sub_adviser": str | null, '
+            '"legal_counsel_firm": str | null, '
+            '"lead_attorney": str | null, '
+            '"strategy_asset_class": str | null, '
+            '"management_fee": str | null, '
+            '"listing_exchange": str | null, '
+            '"distributor_or_admin": str | null, '
+            '"verbatim_key_excerpt": str | null, '
+            '"is_tokenized": bool, '
+            '"tokenization_type": str | null, '
+            '"digital_transfer_agent": str | null, '
+            '"crypto_custodian": str | null, '
+            '"blockchain_network": str | null'
+            "}"
         ),
         messages=[
             {
@@ -109,9 +132,25 @@ def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
                 "content": f"Form Type: {form_type}\n\nFiling Text:\n{excerpt}"
             }
         ],
-        output_format=FilingExtraction,
     )
-    return response.parsed_output
+
+    raw_text = "".join(
+        block.text for block in response.content if getattr(block, "type", None) == "text"
+    ).strip()
+
+    if raw_text.startswith("```"):
+        lines = raw_text.splitlines()
+        if lines and lines[0].startswith("```"):
+            lines = lines[1:]
+        if lines and lines[-1].strip() == "```":
+            lines = lines[:-1]
+        raw_text = "\n".join(lines).strip()
+
+    payload = json.loads(raw_text)
+    if payload.get("vertical") not in ("etf_launches", "private_markets"):
+        payload["vertical"] = "private_markets" if form_type in BDC_FORMS or form_type in {"N-2", "N-2/A", "40-APP"} else "etf_launches"
+
+    return FilingExtraction.model_validate(payload)
 
 
 def get_since_date() -> str:
@@ -226,4 +265,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-
