@@ -49,8 +49,6 @@ EDITIONS = {
             "Co-Investment & Multi-Class Relief",
             "Tokenized / Digital Asset Fund",
             "Routine Update",
-],
-
         ],
         "editor_note_label": "DESK NOTE",
         "editor_note": "",
@@ -611,7 +609,7 @@ def run():
                 supabase.table(cfg["source_table"])
                 .select("*")
                 .gte("filing_date", seven_days_ago)
-                .in_("form_type", ["N-2", "40-APP", "N-2/A"])
+                .in_("form_type", ["N-2", "40-APP", "N-2/A", "10-12G", "10-12G/A", "N-6F", "N-54A"])
                 .order("filing_date", desc=True)
                 .limit(25)
                 .execute()
