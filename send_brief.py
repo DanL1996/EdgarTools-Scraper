@@ -249,7 +249,7 @@ def render_etp_tracker_html(custodians: list[dict], cfg: dict) -> str:
     return f"""
     <div id="ytd-tracker" name="ytd-tracker" style="margin-top:36px;padding-top:24px;border-top:3px solid {cfg['accent_color']};">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:{cfg['badge_text']};">
-        Digital Asset ETP Infrastructure Tracker
+        Crypto ETP Service Provider Tracker
       </div>
       <h2 style="margin:4px 0 4px 0;font-size:18px;font-weight:800;color:#0f172a;">
         Crypto ETP Custodian League Table
@@ -656,4 +656,3 @@ def run():
 
 if __name__ == "__main__":
     run()
-
