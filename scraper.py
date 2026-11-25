@@ -11,13 +11,9 @@ from supabase import create_client
 
 print("[boot] Initializing clients...", flush=True)
 set_identity(os.environ["EDGAR_IDENTITY"])
-print("[boot] EDGAR identity set.", flush=True)
-
 anthropic_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
-print("[boot] Anthropic client ready.", flush=True)
-
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
-print("[boot] Supabase client ready.", flush=True)
+print("[boot] Clients initialized.", flush=True)
 
 TARGET_FORMS = [
     "N-1A",
@@ -73,106 +69,25 @@ def looks_like_bdc_filing(filing, head_text: str) -> bool:
 
 
 class FilingExtraction(BaseModel):
-    is_actionable: bool = Field(
-        description=(
-            "True ONLY if this filing represents a new 1940-Act registered fund/ETF launch, new series registration, "
-            "mutual-fund-to-ETF conversion, closed-end/interval/tender-offer fund or BDC launch/election/intent, "
-            "spot/staked crypto or tokenized ETP registration (S-1), or an Investment Company Act of 1940 exemptive relief application "
-            "(such as co-investment, multi-class shares, ETF share classes, or manager-of-managers relief). "
-            "False for routine annual prospectus updates with no new series/strategy, false for non-fund corporate/operating-company S-1 IPOs or corporate 10-12G filings, "
-            "and STRICTLY FALSE for Investment Advisers Act of 1940 exemptive applications (e.g., Rule 206(4)-5 pay-to-play political contribution waivers, "
-            "Section 202(a)(11)(G) family office exemptions, or Section 206A adviser exemptions)."
-        )
-    )
-    vertical: Literal["etf_launches", "private_markets"] = Field(
-        description=(
-            "Route to 'private_markets' if this is an N-2, N-2/A, 10-12G, 10-12G/A, N-6F, or N-54A filing involving a BDC, interval fund, tender offer fund, or closed-end fund, "
-            "a 1940 Investment Company Act 40-APP seeking co-investment relief (Section 17(d)/57(i)) or multi-class interval/tender-offer/tokenized share-class relief, "
-            "an on-chain money-market/Treasury fund, or an N-1A/485 filing whose primary strategy allocates >15% to private credit, private equity, venture capital, infrastructure, or unlisted secondaries. "
-            "Route all standard ETFs, spot/staked crypto ETPs (S-1/N-1A), mutual-fund-to-ETF conversions, and standard ETF exemptive relief to 'etf_launches'."
-        )
-    )
-    brief_category: str = Field(
-        description=(
-            "If vertical is 'etf_launches', choose one of: 'New Fund Launch', 'ETF Conversion / Material Amendment', 'Exemptive Relief Application', 'Tokenized / Digital Asset Fund', or 'Routine Update'. "
-            "If vertical is 'private_markets', choose one of: 'Interval & Tender Offer Funds', 'Private Credit / PE ETF Launch', 'Co-Investment & Multi-Class Relief', 'Tokenized / Digital Asset Fund', or 'Routine Update'."
-        )
-    )
-    trust_or_registrant_name: Optional[str] = Field(
-        default=None,
-        description="Official name of the Investment Company / Trust / Registrant / BDC."
-    )
-    fund_name: Optional[str] = Field(
-        default=None,
-        description="Specific name(s) of the new fund(s), BDC(s), ETF(s)/ETP(s) being launched or applying for relief."
-    )
-    investment_adviser: Optional[str] = Field(
-        default=None,
-        description="Primary Investment Adviser or Sponsor named in the filing."
-    )
-    sub_adviser: Optional[str] = Field(
-        default=None,
-        description="Sub-adviser(s) named in the filing (e.g., white-label or portfolio sub-adviser), or null if none."
-    )
-    legal_counsel_firm: Optional[str] = Field(
-        default=None,
-        description="Complete outside law firm name representing the trust/applicant/BDC (found on cover page 'Copies to:' or legal opinion exhibit; include full suffix such as LLP or P.C.)."
-    )
-    lead_attorney: Optional[str] = Field(
-        default=None,
-        description="Named individual attorney / partner listed on the cover page ('Copy to:') or signature block, or null if only the firm is listed."
-    )
-    strategy_asset_class: Optional[str] = Field(
-        default=None,
-        description="Concise 1-sentence description of the fund's investment strategy, wrapper (Active ETF, Index ETF, Spot/Staked Crypto ETP, Interval Fund, Tender Offer Fund, BDC), or exemptive relief requested."
-    )
-    management_fee: Optional[str] = Field(
-        default=None,
-        description="Stated management fee or unitary fee (e.g., '0.65%'), or null if blank/[__] placeholder."
-    )
-    listing_exchange: Optional[str] = Field(
-        default=None,
-        description="Target listing exchange for ETFs/ETPs/CEFs (e.g., 'NYSE Arca', 'Nasdaq', 'Cboe BZX'), or null if unlisted interval/tender-offer/non-traded BDC or TBD."
-    )
-    distributor_or_admin: Optional[str] = Field(
-        default=None,
-        description="Named distributor/underwriter or fund administrator if disclosed, or null if not yet named."
-    )
-    verbatim_key_excerpt: Optional[str] = Field(
-        default=None,
-        description="Exact 1-2 sentence verbatim quote from the filing summarizing the new fund/BDC objective, repurchase policy, tokenized structure, or relief sought."
-    )
-    is_tokenized: bool = Field(
-        default=False,
-        description=(
-            "True ONLY if this filing genuinely registers or seeks exemptive relief for a tokenized share class, "
-            "on-chain money market/Treasury fund, spot/staked crypto ETP, or tokenized interval/private fund. "
-            "False if crypto/digital assets are merely mentioned in generic boilerplate risk factors."
-        )
-    )
-    tokenization_type: Optional[
-        Literal[
-            "Tokenized Share Class",
-            "On-Chain MMF/Treasury",
-            "Spot/Staked Crypto ETP",
-            "Tokenized Private/Interval Fund",
-        ]
-    ] = Field(
-        default=None,
-        description="Category of tokenized or digital asset fund if is_tokenized is True, otherwise null."
-    )
-    digital_transfer_agent: Optional[str] = Field(
-        default=None,
-        description="Normalized digital transfer agent or tokenization platform if disclosed (e.g., 'Securitize', 'Superstate', 'Franklin Templeton', 'Taurus', 'Tokeny', 'BNY Mellon', 'State Street'), or null."
-    )
-    crypto_custodian: Optional[str] = Field(
-        default=None,
-        description="Normalized qualified crypto/digital asset custodian if disclosed (e.g., 'Coinbase Custody', 'Anchorage Digital', 'BitGo', 'Fireblocks', 'BNY Mellon', 'Fidelity Digital Assets'), or null."
-    )
-    blockchain_network: Optional[str] = Field(
-        default=None,
-        description="Blockchain network(s) named for on-chain recordkeeping or settlement (e.g., 'Ethereum', 'Solana', 'Stellar', 'Polygon', 'Avalanche', 'Multi-Chain'), or null."
-    )
+    is_actionable: bool = Field(description="True only for actionable 1940-Act fund/BDC/ETP launches, conversions, or 1940-Act relief; false for routine updates, corporate S-1/10-12G, or Advisers Act 40-APPs.")
+    vertical: Literal["etf_launches", "private_markets"] = Field(description="'private_markets' for N-2/N-2/A/BDC/interval/tender/co-invest/on-chain MMF/>15% alts; 'etf_launches' for ETFs/crypto ETPs/ETF relief.")
+    brief_category: str = Field(description="Brief category label for the filing.")
+    trust_or_registrant_name: Optional[str] = Field(default=None, description="Registrant, trust, or BDC name.")
+    fund_name: Optional[str] = Field(default=None, description="Specific fund, BDC, or ETP name.")
+    investment_adviser: Optional[str] = Field(default=None, description="Primary adviser or sponsor.")
+    sub_adviser: Optional[str] = Field(default=None, description="Sub-adviser if named.")
+    legal_counsel_firm: Optional[str] = Field(default=None, description="Outside counsel firm with suffix.")
+    lead_attorney: Optional[str] = Field(default=None, description="Named attorney if listed.")
+    strategy_asset_class: Optional[str] = Field(default=None, description="1-sentence strategy, wrapper, or relief summary.")
+    management_fee: Optional[str] = Field(default=None, description="Stated management/unitary fee or null.")
+    listing_exchange: Optional[str] = Field(default=None, description="Target exchange or null.")
+    distributor_or_admin: Optional[str] = Field(default=None, description="Distributor or administrator if named.")
+    verbatim_key_excerpt: Optional[str] = Field(default=None, description="1-2 sentence verbatim quote from filing.")
+    is_tokenized: bool = Field(default=False, description="True only if genuinely tokenized or crypto/digital-asset ETP/fund.")
+    tokenization_type: Optional[str] = Field(default=None, description="Tokenized Share Class, On-Chain MMF/Treasury, Spot/Staked Crypto ETP, or Tokenized Private/Interval Fund.")
+    digital_transfer_agent: Optional[str] = Field(default=None, description="Tokenization platform or digital TA if named.")
+    crypto_custodian: Optional[str] = Field(default=None, description="Crypto/digital asset custodian if named.")
+    blockchain_network: Optional[str] = Field(default=None, description="Blockchain network if named.")
 
 
 def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
@@ -182,12 +97,11 @@ def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
         model="claude-sonnet-5-5",
         max_tokens=2048,
         system=(
-            "You are a senior 1940-Act & Digital Asset regulatory intelligence analyst writing for ETF/mutual fund executives, "
-            "alternative asset managers, fund service providers, and 1940-Act legal counsel. Extract exact facts from the SEC filing. "
-            "Never guess or invent names, fees, or exchanges—if a field is blank or '[__]', return null. "
-            "For S-1 filings, mark is_actionable=True ONLY if the registrant is a crypto/digital-asset ETP or investment fund (ignore standard corporate IPOs). "
-            "For 10-12G / 10-12G/A / N-6F / N-54A filings, mark is_actionable=True ONLY if the entity is a Business Development Company (BDC) or fund/investment vehicle (ignore standard corporate operating companies). "
-            "For 40-APP filings, mark is_actionable=False if the application is under the Investment Advisers Act of 1940 (such as Rule 206(4)-5 pay-to-play political contribution exemptions or family office exemptions)."
+            "You are a senior 1940-Act & Digital Asset regulatory intelligence analyst. Extract exact facts from the SEC filing. "
+            "Never guess or invent names, fees, or exchanges—if blank or '[__]', return null. "
+            "For S-1 filings, mark is_actionable=True ONLY for crypto/digital-asset ETPs or investment funds. "
+            "For 10-12G / 10-12G/A / N-6F / N-54A filings, mark is_actionable=True ONLY for BDCs or investment vehicles. "
+            "For 40-APP filings, mark is_actionable=False for Investment Advisers Act filings (Rule 206(4)-5 pay-to-play or family office exemptions)."
         ),
         messages=[
             {
@@ -214,7 +128,6 @@ def run():
     print(f"[run] Fetching filings since {since_date} (max={max_filings})...", flush=True)
 
     filings = get_filings(form=TARGET_FORMS, filing_date=f"{since_date}:")
-    print("[run] get_filings() returned; slicing head...", flush=True)
     recent_filings = filings.head(max_filings)
     print(f"[run] Inspecting {len(recent_filings)} filings...", flush=True)
 
@@ -235,7 +148,6 @@ def run():
             continue
 
         try:
-            print(f"[{i}/{len(recent_filings)}] Downloading text for {acc_num}...", flush=True)
             text = filing.text()
             if not text:
                 print(f"[{i}/{len(recent_filings)}] Empty text for {acc_num}, skipping.", flush=True)
@@ -314,3 +226,4 @@ def run():
 
 if __name__ == "__main__":
     run()
+
