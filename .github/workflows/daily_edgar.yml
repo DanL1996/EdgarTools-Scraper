@@ -25,6 +25,8 @@ jobs:
           EDGAR_IDENTITY: ${{ secrets.EDGAR_IDENTITY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SUPABASE_URL: ${{ secrets.SUBBASE_URL }}
+          SCRAPER_SINCE_DATE: "2026-01-01"
+          SCRAPER_MAX_FILINGS: "300"
           SUPABASE_KEY: ${{ secrets.SUBBASE_SECRET }}
         run: python scraper.py
 
