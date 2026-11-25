@@ -16,14 +16,11 @@ anthropic_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 print("[boot] Clients initialized.", flush=True)
 
+# Backfill target forms: Private Markets + BDC filings only
 TARGET_FORMS = [
-    "N-1A",
-    "485APOS",
-    "485BPOS",
     "N-2",
     "N-2/A",
     "40-APP",
-    "S-1",
     "10-12G",
     "10-12G/A",
     "N-6F",
@@ -157,13 +154,15 @@ def get_since_date() -> str:
     explicit_since = (os.environ.get("SCRAPER_SINCE_DATE") or "").strip()
     if explicit_since:
         return explicit_since
-    lookback_days = int(os.environ.get("SCRAPER_LOOKBACK_DAYS", "7"))
-    return (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    if os.environ.get("SCRAPER_LOOKBACK_DAYS"):
+        lookback_days = int(os.environ["SCRAPER_LOOKBACK_DAYS"])
+        return (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    return "2026-01-01"
 
 
 def run():
     since_date = get_since_date()
-    max_filings = int(os.environ.get("SCRAPER_MAX_FILINGS", "80"))
+    max_filings = int(os.environ.get("SCRAPER_MAX_FILINGS", "300"))
     print(f"[run] Fetching filings since {since_date} (max={max_filings})...", flush=True)
 
     filings = get_filings(form=TARGET_FORMS, filing_date=f"{since_date}:")
