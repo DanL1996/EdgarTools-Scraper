@@ -1,5 +1,5 @@
 import os
-import json
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional
 from pydantic import BaseModel, Field
@@ -12,7 +12,21 @@ set_identity(os.environ["EDGAR_IDENTITY"])
 anthropic_client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
 
-TARGET_FORMS = ["N-1A", "485APOS", "485BPOS", "N-2", "N-2/A", "40-APP", "S-1"]
+TARGET_FORMS = [
+    "N-1A",
+    "485APOS",
+    "485BPOS",
+    "N-2",
+    "N-2/A",
+    "40-APP",
+    "S-1",
+    "10-12G",
+    "10-12G/A",
+    "N-6F",
+    "N-54A",
+]
+
+BDC_FORMS = {"10-12G", "10-12G/A", "N-6F", "N-54A"}
 
 
 def normalize_law_firm(firm: Optional[str]) -> Optional[str]:
@@ -27,22 +41,46 @@ def normalize_law_firm(firm: Optional[str]) -> Optional[str]:
     return clean
 
 
+def looks_like_bdc_filing(filing, head_text: str) -> bool:
+    """High-signal pre-filter for 10-12G / 10-12G/A / N-6F / N-54A so corporate 10-12G filers are skipped."""
+    if filing.form in {"N-6F", "N-54A"}:
+        return True
+
+    company_name = (getattr(filing, "company", "") or "").lower()
+    file_num = str(getattr(filing, "file_number", "") or "").lower()
+    combined_meta = f"{company_name} {file_num}"
+
+    if "814-" in combined_meta or "business development" in combined_meta or re.search(r"\bbdc\b", combined_meta):
+        return True
+
+    bdc_patterns = [
+        r"business development company",
+        r"\bbdc\b",
+        r"\b814-\d+",
+        r"section 54\(a\)",
+        r"sections 55 through 65",
+        r"regulated as a business development company",
+        r"intent to file an election",
+    ]
+    return any(re.search(pat, head_text) for pat in bdc_patterns)
+
+
 # 2. Define strict extraction schema for 1940-Act & Digital Asset regulatory intelligence
 class FilingExtraction(BaseModel):
     is_actionable: bool = Field(
         description=(
             "True ONLY if this filing represents a new 1940-Act registered fund/ETF launch, new series registration, "
-            "mutual-fund-to-ETF conversion, closed-end/interval/tender-offer fund or BDC launch, "
+            "mutual-fund-to-ETF conversion, closed-end/interval/tender-offer fund or BDC launch/election/intent, "
             "spot/staked crypto or tokenized ETP registration (S-1), or an Investment Company Act of 1940 exemptive relief application "
             "(such as co-investment, multi-class shares, ETF share classes, or manager-of-managers relief). "
-            "False for routine annual prospectus updates with no new series/strategy, false for non-fund corporate/operating-company S-1 IPOs, "
+            "False for routine annual prospectus updates with no new series/strategy, false for non-fund corporate/operating-company S-1 IPOs or corporate 10-12G filings, "
             "and STRICTLY FALSE for Investment Advisers Act of 1940 exemptive applications (e.g., Rule 206(4)-5 pay-to-play political contribution waivers, "
             "Section 202(a)(11)(G) family office exemptions, or Section 206A adviser exemptions)."
         )
     )
     vertical: Literal["etf_launches", "private_markets"] = Field(
         description=(
-            "Route to 'private_markets' if this is an N-2 or N-2/A filing (interval fund, tender offer fund, non-traded BDC, closed-end fund), "
+            "Route to 'private_markets' if this is an N-2, N-2/A, 10-12G, 10-12G/A, N-6F, or N-54A filing involving a BDC, interval fund, tender offer fund, or closed-end fund, "
             "a 1940 Investment Company Act 40-APP seeking co-investment relief (Section 17(d)/57(i)) or multi-class interval/tender-offer/tokenized share-class relief, "
             "an on-chain money-market/Treasury fund, or an N-1A/485 filing whose primary strategy allocates >15% to private credit, private equity, venture capital, infrastructure, or unlisted secondaries. "
             "Route all standard ETFs, spot/staked crypto ETPs (S-1/N-1A), mutual-fund-to-ETF conversions, and standard ETF exemptive relief to 'etf_launches'."
@@ -56,11 +94,11 @@ class FilingExtraction(BaseModel):
     )
     trust_or_registrant_name: Optional[str] = Field(
         default=None,
-        description="Official name of the Investment Company / Trust / Registrant."
+        description="Official name of the Investment Company / Trust / Registrant / BDC."
     )
     fund_name: Optional[str] = Field(
         default=None,
-        description="Specific name(s) of the new fund(s) or ETF(s)/ETP(s) being launched or applying for relief."
+        description="Specific name(s) of the new fund(s), BDC(s), ETF(s)/ETP(s) being launched or applying for relief."
     )
     investment_adviser: Optional[str] = Field(
         default=None,
@@ -72,7 +110,7 @@ class FilingExtraction(BaseModel):
     )
     legal_counsel_firm: Optional[str] = Field(
         default=None,
-        description="Complete outside law firm name representing the trust/applicant (found on cover page 'Copies to:' or legal opinion exhibit; include full suffix such as LLP or P.C.)."
+        description="Complete outside law firm name representing the trust/applicant/BDC (found on cover page 'Copies to:' or legal opinion exhibit; include full suffix such as LLP or P.C.)."
     )
     lead_attorney: Optional[str] = Field(
         default=None,
@@ -88,7 +126,7 @@ class FilingExtraction(BaseModel):
     )
     listing_exchange: Optional[str] = Field(
         default=None,
-        description="Target listing exchange for ETFs/ETPs/CEFs (e.g., 'NYSE Arca', 'Nasdaq', 'Cboe BZX'), or null if unlisted interval/tender-offer fund or TBD."
+        description="Target listing exchange for ETFs/ETPs/CEFs (e.g., 'NYSE Arca', 'Nasdaq', 'Cboe BZX'), or null if unlisted interval/tender-offer/non-traded BDC or TBD."
     )
     distributor_or_admin: Optional[str] = Field(
         default=None,
@@ -96,7 +134,7 @@ class FilingExtraction(BaseModel):
     )
     verbatim_key_excerpt: Optional[str] = Field(
         default=None,
-        description="Exact 1-2 sentence verbatim quote from the filing summarizing the new fund objective, repurchase policy, tokenized structure, or relief sought."
+        description="Exact 1-2 sentence verbatim quote from the filing summarizing the new fund/BDC objective, repurchase policy, tokenized structure, or relief sought."
     )
     # --- Tokenization & Digital Asset Fields ---
     is_tokenized: bool = Field(
@@ -133,7 +171,6 @@ class FilingExtraction(BaseModel):
 
 
 def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
-    # Truncate to first ~28,000 chars (covers cover page, fee table, strategy, adviser/sub-adviser, and counsel)
     excerpt = filing_text[:28000]
 
     response = anthropic_client.messages.parse(
@@ -144,6 +181,7 @@ def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
             "alternative asset managers, fund service providers, and 1940-Act legal counsel. Extract exact facts from the SEC filing. "
             "Never guess or invent names, fees, or exchanges—if a field is blank or '[__]', return null. "
             "For S-1 filings, mark is_actionable=True ONLY if the registrant is a crypto/digital-asset ETP or investment fund (ignore standard corporate IPOs). "
+            "For 10-12G / 10-12G/A / N-6F / N-54A filings, mark is_actionable=True ONLY if the entity is a Business Development Company (BDC) or fund/investment vehicle (ignore standard corporate operating companies). "
             "For 40-APP filings, mark is_actionable=False if the application is under the Investment Advisers Act of 1940 (such as Rule 206(4)-5 pay-to-play political contribution exemptions or family office exemptions)."
         ),
         messages=[
@@ -157,12 +195,21 @@ def analyze_filing(form_type: str, filing_text: str) -> FilingExtraction:
     return response.parsed_output
 
 
+def get_since_date() -> str:
+    explicit_since = (os.environ.get("SCRAPER_SINCE_DATE") or "").strip()
+    if explicit_since:
+        return explicit_since
+    lookback_days = int(os.environ.get("SCRAPER_LOOKBACK_DAYS", "3"))
+    return (datetime.now(timezone.utc) - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+
+
 def run():
-    since_date = (datetime.now(timezone.utc) - timedelta(days=3)).strftime("%Y-%m-%d")
-    print(f"Fetching 1940-Act & Digital Asset filings since {since_date}...")
+    since_date = get_since_date()
+    max_filings = int(os.environ.get("SCRAPER_MAX_FILINGS", "80"))
+    print(f"Fetching 1940-Act, BDC & Digital Asset filings since {since_date}...")
 
     filings = get_filings(form=TARGET_FORMS, filing_date=f"{since_date}:")
-    recent_filings = filings.head(40)
+    recent_filings = filings.head(max_filings)
     print(f"Inspecting {len(recent_filings)} filings...")
 
     inserted_count = 0
@@ -192,6 +239,11 @@ def run():
                 if not any(k in lower_head for k in ("bitcoin", "ethereum", "solana", "digital asset", "crypto", "tokeniz", "trust", "etf", "etp")):
                     continue
 
+            # Fast pre-filter for 10-12G / 10-12G/A / N-6F / N-54A so non-BDC corporate filers are skipped
+            if filing.form in BDC_FORMS:
+                if not looks_like_bdc_filing(filing, lower_head):
+                    continue
+
             # Fast pre-filter for 40-APPs to exclude Investment Advisers Act pay-to-play / family office filings
             if filing.form == "40-APP":
                 if any(k in lower_head for k in ("206(4)-5", "pay-to-play", "pay to play", "political contribution", "202(a)(11)(g)", "family office")):
@@ -204,6 +256,15 @@ def run():
                 print(f"Skipping non-actionable {filing.form} ({acc_num})")
                 continue
 
+            vertical = extraction.vertical
+            brief_category = extraction.brief_category
+
+            # Ensure BDC form filings always route cleanly to private_markets
+            if filing.form in BDC_FORMS:
+                vertical = "private_markets"
+                if brief_category == "Routine Update":
+                    brief_category = "New Interval / Tender Offer Fund"
+
             counsel_firm = normalize_law_firm(extraction.legal_counsel_firm)
 
             row = {
@@ -211,8 +272,8 @@ def run():
                 "form_type": filing.form,
                 "filing_date": str(filing.filing_date),
                 "edgar_url": filing.filing_url,
-                "vertical": extraction.vertical,
-                "brief_category": extraction.brief_category,
+                "vertical": vertical,
+                "brief_category": brief_category,
                 "trust_or_registrant_name": extraction.trust_or_registrant_name,
                 "fund_name": extraction.fund_name,
                 "investment_adviser": extraction.investment_adviser,
@@ -235,7 +296,7 @@ def run():
             supabase.table("sec_filings").upsert(row).execute()
             inserted_count += 1
             tok_badge = f" [TOKENIZED: {extraction.tokenization_type}]" if extraction.is_tokenized else ""
-            print(f"[{extraction.vertical}]{tok_badge} Inserted {filing.form}: {extraction.fund_name or extraction.trust_or_registrant_name}")
+            print(f"[{vertical}]{tok_badge} Inserted {filing.form}: {extraction.fund_name or extraction.trust_or_registrant_name}")
 
         except Exception as e:
             print(f"Error processing {acc_num}: {e}")
