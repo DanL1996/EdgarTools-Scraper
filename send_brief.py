@@ -44,10 +44,13 @@ EDITIONS = {
         "badge_bg": "#ecfdf5",
         "badge_text": "#047857",
         "categories": [
-            "New Interval / Tender Offer Fund",
-            "Tokenized / Digital Asset Fund",
+            "Interval & Tender Offer Funds",
             "Private Credit / PE ETF Launch",
             "Co-Investment & Multi-Class Relief",
+            "Tokenized / Digital Asset Fund",
+            "Routine Update",
+],
+
         ],
         "editor_note_label": "DESK NOTE",
         "editor_note": "",
