@@ -1,4 +1,5 @@
 import html
+import json
 import os
 from datetime import datetime, timedelta, timezone
 from supabase import create_client
@@ -14,9 +15,9 @@ EDITIONS = {
     "etf_launches": {
         "output_file": "brief_launches.html",
         "source_table": "sec_filings",
-        "kicker": "1940-Act Regulatory Intelligence",
-        "title": "ETF & Fund Launch Brief",
-        "subtitle": "New ETF & Mutual Fund Launches, Conversions, Crypto ETPs, and Exemptive Relief",
+        "kicker": "",
+        "title": "ETF Pipeline Monitor",
+        "subtitle": "New ETFs, Post-Effective Launches, Crypto ETPs & Share-Class Relief",
         "accent_color": "#0f172a",   # Navy Slate
         "badge_bg": "#eff6ff",
         "badge_text": "#1d4ed8",
@@ -26,15 +27,19 @@ EDITIONS = {
             "ETF Conversion / Material Amendment",
             "Exemptive Relief Application",
         ],
+        "editor_note_label": "DESK NOTE",
+        "editor_note": "",
+        "section_notes": {},
         "presenting_sponsor": None,
         "partner_spotlight": None,
+        "classifieds": [],
     },
     "private_markets": {
         "output_file": "brief_private_markets.html",
         "source_table": "pm_email_filings",
-        "kicker": "Alternative & Illiquid Registered Funds",
-        "title": "Private Markets in Public Funds Brief",
-        "subtitle": "Interval Funds, Tender Offer Funds, BDCs, Private Credit, Tokenized Funds & Relief",
+        "kicker": "",
+        "title": "Registered Alts Monitor",
+        "subtitle": "Interval Funds, Tender Offer Funds, Non-Traded BDCs, Tokenization & Exemptive Relief",
         "accent_color": "#064e3b",   # Institutional Forest Green
         "badge_bg": "#ecfdf5",
         "badge_text": "#047857",
@@ -44,10 +49,34 @@ EDITIONS = {
             "Private Credit / PE ETF Launch",
             "Co-Investment & Multi-Class Relief",
         ],
+        "editor_note_label": "DESK NOTE",
+        "editor_note": "",
+        "section_notes": {},
         "presenting_sponsor": None,
         "partner_spotlight": None,
+        "classifieds": [],
     },
 }
+
+
+def load_editorial_overrides(edition: str, cfg: dict) -> dict:
+    """Optionally loads commentary from editorial.json without touching send_brief.py."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "editorial.json")
+    if not os.path.exists(path):
+        return cfg
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as exc:
+        print(f"[{edition}] Warning: could not parse editorial.json ({exc}); using defaults.")
+        return cfg
+
+    ed_data = data.get(edition) or {}
+    merged = dict(cfg)
+    for key in ("editor_note_label", "editor_note", "section_notes"):
+        if key in ed_data:
+            merged[key] = ed_data[key]
+    return merged
 
 
 def clean_counsel_firm(firm: str | None) -> str | None:
@@ -134,6 +163,70 @@ def render_filing_card(row: dict, cfg: dict) -> str:
       <a href="{url}" target="_blank" style="font-size:13px;font-weight:600;color:{cfg['badge_text']};text-decoration:none;">
         View Official SEC Filing &rarr;
       </a>
+    </div>
+    """
+
+
+def render_lead_or_editorial(vertical_key: str, cfg: dict, filing_count: int) -> str:
+    """Renders top editorial commentary if provided; otherwise renders concise filing count."""
+    note = (cfg.get("editor_note") or "").strip()
+    if note:
+        label = html.escape(str(cfg.get("editor_note_label") or "DESK NOTE"))
+        return f"""
+        <div style="margin-top:14px;margin-bottom:6px;padding:14px 16px;background:#f8fafc;border-left:4px solid {cfg['accent_color']};border-radius:0 4px 4px 0;">
+          <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:{cfg['accent_color']};margin-bottom:5px;">
+            {label}
+          </div>
+          <div style="font-size:13.5px;color:#1e293b;line-height:1.55;">
+            {note}
+          </div>
+        </div>
+        """
+
+    if vertical_key == "private_markets":
+        summary = f"Tracking <strong>{filing_count} new 1940-Act registrations</strong>, structural amendments, and exemptive applications."
+    else:
+        summary = f"Tracking <strong>{filing_count} new ETF registrations</strong>, post-effective launches, crypto ETPs, and share-class filings."
+
+    return f"""
+    <div style="font-size:13.5px;color:#475569;margin-top:12px;line-height:1.5;">
+      {summary}
+    </div>
+    """
+
+
+def render_section_note(cfg: dict, category: str) -> str:
+    """Renders optional editorial context note directly beneath a category heading."""
+    notes = cfg.get("section_notes") or {}
+    note = (notes.get(category) or "").strip()
+    if not note:
+        return ""
+    return f"""
+    <div style="margin:10px 0 4px 0;padding:9px 12px;background:#f8fafc;border-radius:4px;font-size:12.5px;color:#475569;font-style:italic;line-height:1.45;">
+      {note}
+    </div>
+    """
+
+
+def render_classifieds(cfg: dict) -> str:
+    """Renders optional 1-2 line classified / partner resource links above the league tables."""
+    items = cfg.get("classifieds") or []
+    if not items:
+        return ""
+    rows = "".join(
+        f'<li style="margin-bottom:7px;font-size:13px;line-height:1.45;color:#334155;">'
+        f'<a href="{item["url"]}" target="_blank" style="font-weight:700;color:{cfg["badge_text"]};text-decoration:none;">{html.escape(str(item["title"]))}</a>'
+        f' &mdash; {html.escape(str(item["text"]))}</li>'
+        for item in items
+    )
+    return f"""
+    <div style="margin-top:26px;padding:14px 16px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:4px;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b;margin-bottom:8px;">
+        Industry Resources &amp; Partner Links
+      </div>
+      <ul style="margin:0;padding-left:18px;">
+        {rows}
+      </ul>
     </div>
     """
 
@@ -357,6 +450,7 @@ def render_pm_ytd_tracker_html(tracker: dict, current_year: int, cfg: dict) -> s
 def build_brief_html(
     filings: list[dict],
     cfg: dict,
+    vertical_key: str = "etf_launches",
     ytd_tracker_html: str = "",
     show_jump_btn: bool = False,
     jump_label: str = "",
@@ -382,12 +476,14 @@ def build_brief_html(
         if not items:
             continue
         section_index += 1
+        section_note_html = render_section_note(cfg, category)
         cards = "".join(render_filing_card(item, cfg) for item in items)
         sections_html += f"""
         <div style="margin-top:26px;">
           <h2 style="font-size:13px;text-transform:uppercase;letter-spacing:1px;color:{cfg['accent_color']};border-bottom:2px solid {cfg['accent_color']};padding-bottom:6px;margin:0;">
             {category} ({len(items)})
           </h2>
+          {section_note_html}
           {cards}
         </div>
         """
@@ -417,6 +513,9 @@ def build_brief_html(
         </div>
         """
 
+    lead_in_html = render_lead_or_editorial(vertical_key, cfg, len(filings))
+    classifieds_html = render_classifieds(cfg)
+
     presenting = cfg.get("presenting_sponsor")
     presenting_html = ""
     if presenting:
@@ -428,6 +527,14 @@ def build_brief_html(
           <strong>{presenting["name"]}</strong>:
           {presenting["tagline"]}
           <a href="{presenting["url"]}" target="_blank" style="color:{cfg['badge_text']};font-weight:600;text-decoration:none;margin-left:4px;">{presenting["cta_text"]} &rarr;</a>
+        </div>
+        """
+
+    kicker_html = ""
+    if cfg.get("kicker"):
+        kicker_html = f"""
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:#cbd5e1;font-weight:600;margin-bottom:6px;">
+          {cfg['kicker']} &bull; {today_str}
         </div>
         """
 
@@ -457,13 +564,11 @@ def build_brief_html(
       <table width="100%" cellpadding="0" cellspacing="0" border="0">
         <tr>
           <td align="left" valign="middle">
-            <div style="font-size:11px;text-transform:uppercase;letter-spacing:1.2px;color:#cbd5e1;font-weight:600;">
-              {cfg['kicker']} &bull; {today_str}
-            </div>
-            <h1 style="margin:6px 0 4px 0;font-size:22px;font-weight:800;letter-spacing:-0.3px;color:#ffffff;">
+            {kicker_html}
+            <h1 style="margin:0 0 6px 0;font-size:23px;font-weight:800;letter-spacing:-0.3px;color:#ffffff;">
               {cfg['title']}
             </h1>
-            <div style="font-size:13px;color:#e2e8f0;">
+            <div style="font-size:13px;color:#e2e8f0;line-height:1.45;">
               {cfg['subtitle']}
             </div>
           </td>
@@ -476,11 +581,11 @@ def build_brief_html(
 
     <!-- Main Body -->
     <div style="padding:10px 28px 28px 28px;">
-      <div style="font-size:13.5px;color:#475569;margin-top:12px;line-height:1.5;">
-        Here are the <strong>{len(filings)} notable filings</strong> spotted on SEC EDGAR, complete with counsel, adviser, and key prospectus disclosures.
-      </div>
+      {lead_in_html}
 
       {sections_html}
+
+      {classifieds_html}
 
       {ytd_tracker_html}
     </div>
@@ -502,7 +607,9 @@ def run():
     seven_days_ago = (now_utc - timedelta(days=7)).strftime("%Y-%m-%d")
     is_manual_dispatch = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch"
 
-    for vertical_key, cfg in EDITIONS.items():
+    for vertical_key, base_cfg in EDITIONS.items():
+        cfg = load_editorial_overrides(vertical_key, base_cfg)
+
         if vertical_key == "private_markets":
             if now_utc.weekday() != PM_WEEKLY_DAY and not is_manual_dispatch:
                 print(f"[private_markets] Skipping scheduled send (runs 1x/week on weekday {PM_WEEKLY_DAY}).")
@@ -521,12 +628,19 @@ def run():
 
             tracker_data = fetch_pm_ytd_tracker(current_year)
             ytd_html = render_pm_ytd_tracker_html(tracker_data, current_year, cfg)
-            brief_output = build_brief_html(filings, cfg, ytd_tracker_html=ytd_html, show_jump_btn=True)
+            brief_output = build_brief_html(
+                filings,
+                cfg,
+                vertical_key=vertical_key,
+                ytd_tracker_html=ytd_html,
+                show_jump_btn=True,
+            )
         else:
             response = (
                 supabase.table(cfg["source_table"])
                 .select("*")
                 .eq("vertical", vertical_key)
+                .eq("is_excluded", False)
                 .order("filing_date", desc=True)
                 .limit(15)
                 .execute()
@@ -539,6 +653,7 @@ def run():
             brief_output = build_brief_html(
                 filings,
                 cfg,
+                vertical_key=vertical_key,
                 ytd_tracker_html=etp_tracker_html,
                 show_jump_btn=bool(custodians),
                 jump_label="Crypto ETP League",
